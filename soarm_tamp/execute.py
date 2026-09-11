@@ -75,6 +75,67 @@ def _resample(qs: list[list[float]], max_step: float) -> list[list[float]]:
     return out
 
 
+
+def _robot_config():
+    """The SO-101 config, since that is the arm this package plans for.
+
+    ``ServoRobot`` defaults to ``soarm100.yaml``; both ship the same joint
+    limits, but being explicit keeps this honest about which revision is on
+    the bench (see the SO-100/SO-101 naming trap in the workspace docs).
+    """
+    from soarm_sdk import load_robot_config
+
+    return load_robot_config("so101")
+
+
+def _report_reach(segments: list[dict], cal, max_step: float) -> None:
+    """Say how many commands the SDK would clamp, without touching hardware.
+
+    The point of a dry run is to find out whether a plan is executable
+    *before* an arm is involved, and "would any of this be clamped?" is the
+    sharpest form of that question: a clamped command means the arm cannot
+    reach where the plan wants it, so the trajectory silently stops being
+    the trajectory that was planned.
+
+    Needs soarm_sdk for the limits, which the planning container does not
+    have — so this degrades to a note rather than failing the dry run.
+    """
+    try:
+        import numpy as np
+
+        from soarm_sdk.robot import ServoRobot
+    except ImportError:
+        print("  reach check : skipped (soarm_sdk not importable here)")
+        return
+
+    probe = ServoRobot(port="", config=_robot_config(), calibration=cal)
+    lo, hi = probe.effective_joint_limits()
+
+    qs: list[list[float]] = []
+    for seg in segments:
+        qs.extend(_resample(seg["q"], max_step))
+    Q = np.asarray(qs)
+
+    # Match the SDK's own rule: an excursion smaller than half an encoder
+    # tick cannot change what the servo does, so it is not a clamp.
+    from soarm_sdk.robot.hardware import _CLAMP_EPS_RAD
+
+    outside = (Q < lo - _CLAMP_EPS_RAD) | (Q > hi + _CLAMP_EPS_RAD)
+    n = int(outside.any(axis=1).sum())
+    source = "config ∩ measured travel" if cal is not None else "config only"
+    print(f"  reach check : {n} of {len(Q)} commands would be clamped ({source})")
+    if n:
+        names = probe.joint_names
+        per = outside.sum(axis=0)
+        worst = ", ".join(
+            f"{names[i]}×{int(c)}" for i, c in enumerate(per) if c
+        )
+        print(f"                ^ {worst}")
+        print("                A clamped command means the plan asked for a pose")
+        print("                this arm cannot reach — investigate the mapping,")
+        print("                do not widen the limit.")
+
+
 def _gripper_plan(segments: list[dict]) -> dict[int, str]:
     """Map segment index -> jaw action to perform AFTER that segment.
 
@@ -152,7 +213,9 @@ def run(
     print("=" * 70)
 
     robot = None
-    if not dry_run:
+    if dry_run:
+        _report_reach(segments, cal, max_step)
+    else:
         # Imported here, not at module scope: --dry-run must stay runnable
         # anywhere, including in CI and in the planning container, neither
         # of which has a serial stack.
@@ -165,6 +228,7 @@ def run(
         # the counters at the end say so.
         robot = ServoRobot(
             port=port,
+            config=_robot_config(),
             calibration=cal,
             max_step_rad=max_step,
             enforce_limits=True,

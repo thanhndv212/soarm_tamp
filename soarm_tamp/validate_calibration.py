@@ -175,9 +175,15 @@ def main() -> None:
     if cal.suspect_joints:
         print(f"flagged     : {', '.join(cal.suspect_joints)}")
 
+    from soarm_sdk import load_robot_config
     from soarm_sdk.robot import ServoRobot
 
-    robot = ServoRobot(port=args.port, calibration=cal, max_step_rad=0.05)
+    robot = ServoRobot(
+        port=args.port,
+        config=load_robot_config("so101"),
+        calibration=cal,
+        max_step_rad=0.05,
+    )
     robot.connect()
     try:
         if not rung1_read_only(robot, cal):

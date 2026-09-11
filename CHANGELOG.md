@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Initial development. Nothing released yet, and nothing has run on the
 physical arm yet — see "Not yet done" below.
 
+### Added
+
+- **`--dry-run` now reports how many commands would be clamped.** The plan
+  for this package always called for that check — "dry-run on cube05 must
+  report 0 clamped" — but clamp counters live in the SDK and are only read
+  back after a *live* run, so a dry run could never answer it. It now
+  computes the same limits `ServoRobot` would enforce (including the
+  intersection with a calibration's measured travel) and reports against
+  them. It found a real defect immediately: 200 of 366 commands on cube05
+  would have been clamped, from a frame error in the SDK's declared limits.
+  Fixed there; all runs now report 0.
+- Both `execute.py` and `validate_calibration.py` now load the **`so101`**
+  config explicitly rather than taking `ServoRobot`'s `soarm100` default.
+  They ship identical limits, but this package plans against the SO-101
+  URDF and should say so.
+
 ### Changed
 
 - Import paths updated for `soarm_sdk`'s package reorganization
