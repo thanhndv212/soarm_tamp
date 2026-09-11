@@ -1,0 +1,151 @@
+# SO-101 cube pick-and-place — task configuration.
+#
+# Consumed by long_tamp's YamlTaskLoader. Every path below is a
+# CONTAINER-absolute path: pyhpp exists only inside the planning container
+# (scripts/hpp_container.sh), which mounts soarm-ws at
+# /home/thanhndv212/devel/soarm-ws — not at this host's own path.
+#
+# Assets under generated/ are produced by soarm_tamp/build_assets.py. Do
+# not hand-edit them; edit the builder.
+#
+# Scene: an SO-101 bolted to the table at the origin picks a 25 mm cube
+# from A and docks it onto a named spot at B.
+
+task: soarm_cube_pick_place
+
+paths:
+  robot:
+    so101:
+      urdf: "/home/thanhndv212/devel/soarm-ws/soarm_tamp/soarm_tamp/generated/so101.urdf"
+      srdf: "/home/thanhndv212/devel/soarm-ws/soarm_tamp/soarm_tamp/generated/so101.srdf"
+  objects:
+    # The table is an OBJECT, not an environment, because only objects can
+    # carry handles through the ConstraintGraphFactory (which is fed
+    # OBJECTS + HANDLES_PER_OBJECT). It is a freeflyer like any object, and
+    # pinned by freeze_joints below — see that key's comment.
+    table:
+      urdf: "/home/thanhndv212/devel/soarm-ws/soarm_tamp/soarm_tamp/generated/table.urdf"
+      srdf: "/home/thanhndv212/devel/soarm-ws/soarm_tamp/soarm_tamp/generated/table.srdf"
+    cube:
+      urdf: "/home/thanhndv212/devel/soarm-ws/soarm_tamp/soarm_tamp/generated/cube.urdf"
+      srdf: "/home/thanhndv212/devel/soarm-ws/soarm_tamp/soarm_tamp/generated/cube.srdf"
+
+robots:
+  - so101
+
+environments: []
+
+# ---------------------------------------------------------------------------
+# Joint groups. Bounds are NOT the URDF's own limits — they are
+# conventions.safe_planning_bounds(), the URDF range intersected with what
+# the servos can actually reach, under both sign hypotheses.
+#
+# This matters: the URDF lets wrist_roll reach 2.841 rad but the servo
+# stops at 2.79, and the first successful plan here used the full URDF
+# range and put 41 waypoints past that stop. Clamping them at send time
+# would have quietly deformed the path rather than followed it, so the
+# restriction belongs here, where the planner can respect it. elbow_flex
+# loses the most (1.69 -> 1.569) for the same reason.
+#
+# `gripper` is the jaw. It is frozen during planning (see freeze_joints)
+# at 10 deg = 0.1745 rad, which is a 29.1 mm opening — 4 mm of clearance
+# around the 25 mm cube. That value is not arbitrary: the grasp frame
+# baked into so101.srdf is the jaw centerline AT THIS ANGLE, so changing
+# one without the other silently moves the grasp off-centre. Both come
+# from soarm_tamp/geometry.py.
+# ---------------------------------------------------------------------------
+joint_groups:
+  SO101:
+    - {joint: so101/shoulder_pan,   initial:  0.0,    bounds: [-1.9199, 1.9199]}
+    - {joint: so101/shoulder_lift,  initial:  0.0,    bounds: [-1.7448, 1.7448]}
+    - {joint: so101/elbow_flex,     initial:  0.0,    bounds: [-1.5692, 1.5692]}
+    - {joint: so101/wrist_flex,     initial:  0.0,    bounds: [-1.6581, 1.6581]}
+    - {joint: so101/wrist_roll,     initial:  0.0,    bounds: [-2.7439, 2.79]}
+    - {joint: so101/gripper,        initial:  0.1745, bounds: [-0.1745, 1.7453]}
+
+# ---------------------------------------------------------------------------
+# Freeflyer bounds apply to every loaded object (SceneBuilder uses one set
+# for all), so this box must contain BOTH the table's pinned pose at the
+# origin and the cube's whole working range: A = (0.22, -0.10), B =
+# (0.22, +0.10), plus headroom to lift the cube clear of the table.
+# ---------------------------------------------------------------------------
+freeflyer_bounds:
+  translation: [[-0.05, 0.35], [-0.25, 0.25], [-0.02, 0.20]]
+  quaternion:  [[-1.0001, 1.0001], [-1.0001, 1.0001],
+                [-1.0001, 1.0001], [-1.0001, 1.0001]]
+
+# ---------------------------------------------------------------------------
+# Arm groups — drives GraspSequencePlanner's auto-freeze.
+#
+# cube/foot is listed here even though it is a gripper on a carried
+# OBJECT, not on a robot link. The phase-locking chain-walk only follows
+# the handle side's holder chain, never the active gripper's own carrier,
+# so the arm that must stay unfrozen while the cube docks has to be named
+# by hand. Same hand-wiring the ikea prototype needs for legN/peg and
+# agimus_spacelab for screw_driver/g_SD_part. With a single arm there is
+# nothing else it could be, but the declaration is still required.
+# ---------------------------------------------------------------------------
+arm_groups:
+  so101:
+    joint_keyword: "so101"
+    grippers:
+      - so101/grasp
+      - cube/foot
+
+objects:
+  table:
+    # Identity: the table URDF already places its surface at z=0, the real
+    # robot mounting plane. Pinned here by freeze_joints.
+    initial_pose_xyzquat: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    handles:
+      - table/spot_b
+  cube:
+    # A = (0.22, -0.10). z = 0.0125 = half the 25 mm edge, i.e. resting on
+    # the z=0 surface. The table's COLLISION box is recessed 3 mm below
+    # that (see build_assets.py) so this resting contact does not read as
+    # interpenetration.
+    initial_pose_xyzquat: [0.22, -0.10, 0.0125, 0.0, 0.0, 0.0, 1.0]
+    handles:
+      - cube/top
+
+grippers:
+  - so101/grasp
+  - cube/foot
+
+# so101/grasp picks the cube up; cube/foot then docks onto the table's
+# named spot. Restricting cube/foot to exactly one handle is what makes
+# "place at B" deterministic rather than an emergent drop location.
+valid_pairs:
+  so101/grasp:
+    - cube/top
+  cube/foot:
+    - table/spot_b
+
+environment_contacts: {}
+
+# ---------------------------------------------------------------------------
+# Frozen joints, locked at their q_init value for the whole plan.
+#
+#   table/root_joint — pins the table. It has to be a freeflyer object to
+#     carry a handle, but it is furniture; without this it would be free
+#     to drift, and a moving place-target is meaningless.
+#   so101/gripper    — the jaw. The grasp is a rigid TCP constraint, not
+#     simulated finger closing, so the jaw contributes nothing to planning
+#     and only needs to render at a sensible width. Real opening and
+#     closing happens at execution time (soarm_tamp/execute.py).
+# ---------------------------------------------------------------------------
+freeze_joints:
+  - table/root_joint
+  - so101/gripper
+
+planning:
+  validation_step: 0.01
+  projector_step: 0.1
+  max_iterations: 1000
+  max_random_attempts: 1000
+
+optimization:
+  random_shortcut_loops: 50
+  spline_zero_derivatives_at_state: false
+  time_param_safety: 0.95
+  time_param_order: 2

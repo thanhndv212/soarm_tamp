@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "soarm_tamp"
+version = "0.1.0"
+description = "Long-horizon TAMP (long_tamp/HPP) driving a physical SO-101 arm"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Thanh Nguyen" }]
+dependencies = []
+
+# Deliberately no install_requires. The two halves of this package never
+# run in the same interpreter:
+#   plan.py      needs long_tamp + pyhpp, which exist only in the HPP
+#                planning container (scripts/hpp_container.sh)
+#   execute.py   needs soarm_sdk and a serial port, which exist only on
+#                the host
+# Declaring either as a hard dependency would make the package
+# uninstallable in the other place. Each is imported at point of use.
+
+[project.optional-dependencies]
+host = ["soarm_sdk"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["soarm_tamp"]
