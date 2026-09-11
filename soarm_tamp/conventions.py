@@ -2,7 +2,7 @@
 
 This module used to carry the URDF-to-servo mapping itself, with offsets
 derived from comparing two limit tables and signs left as an outright
-guess. That belonged in the SDK, not here: ``soarm_sdk.frame_calibration``
+guess. That belonged in the SDK, not here: ``soarm_sdk.calibration``
 now owns the model, the seeding and the persistence, and
 ``ServoHardwareInterface`` applies it alongside joint-limit and step-size
 clamping. What is left here is the part specific to planning:
@@ -25,10 +25,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Sequence
 
 if TYPE_CHECKING:  # pragma: no cover
-    from soarm_sdk.frame_calibration import RobotCalibration
+    from soarm_sdk.calibration.frame import RobotCalibration
 
 # so101_new_calib.urdf joint limits, URDF joint order. Duplicated from
-# soarm_sdk.seed_calibration on purpose: the container-side planner reads
+# soarm_sdk.calibration.seed on purpose: the container-side planner reads
 # these without the SDK installed.
 URDF_LIMITS: dict[str, tuple[float, float]] = {
     "shoulder_pan": (-1.91986, 1.91986),
@@ -53,14 +53,14 @@ def calibration_path() -> Path:
 
 def load_calibration(path: str | Path | None = None) -> "RobotCalibration":
     """Load the arm's calibration, or explain how to make one."""
-    from soarm_sdk.frame_calibration import RobotCalibration
+    from soarm_sdk.calibration.frame import RobotCalibration
 
     p = Path(path) if path else calibration_path()
     if not p.exists():
         raise FileNotFoundError(
             f"no calibration at {p}\n"
             "  Seed one (no hardware needed):\n"
-            "    python -m soarm_sdk.seed_calibration --lerobot <lerobot.json>"
+            "    soarm-seed-calibration --lerobot <lerobot.json>"
         )
     return RobotCalibration.load(p)
 

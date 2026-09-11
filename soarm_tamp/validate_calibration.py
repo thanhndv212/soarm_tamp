@@ -5,7 +5,7 @@ RUNS ON THE HOST, with the arm connected.
 
     python -m soarm_tamp.validate_calibration --port /dev/cu.usbmodemXXXX
 
-``soarm_sdk.seed_calibration`` produces a calibration offline, but it can
+``soarm_sdk.calibration.seed`` produces a calibration offline, but it can
 only *estimate*: the direction signs are assumed +1, because a travel range
 says how far a joint moves and not which end is which. This walks the
 escalating checks that settle it, and marks the file validated only when
@@ -175,7 +175,7 @@ def main() -> None:
     if cal.suspect_joints:
         print(f"flagged     : {', '.join(cal.suspect_joints)}")
 
-    from soarm_sdk.servo_robot import ServoRobot
+    from soarm_sdk.robot import ServoRobot
 
     robot = ServoRobot(port=args.port, calibration=cal, max_step_rad=0.05)
     robot.connect()
