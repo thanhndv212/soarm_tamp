@@ -42,7 +42,7 @@ signs are measured (see *Joint conventions* below).
 python -m soarm_tamp.execute runs/cube01 --dry-run
 
 # 4a. ONCE per arm: seed a calibration from measured travel (offline)
-python -m soarm_sdk.seed_calibration \
+soarm-seed-calibration \
   --lerobot ~/.cache/huggingface/lerobot/calibration/robots/so101_follower/thanh_arm.json \
   --arm-id thanh_arm
 
@@ -84,7 +84,7 @@ usable yaw at every candidate spot, so this costs no reachability.
 
 The planning URDF, `soarm_sdk` and lerobot each use a different joint-angle
 zero, and until now no code related any of them to the URDF's. That mapping
-now lives in `soarm_sdk.frame_calibration`, shared with RL deployment
+now lives in `soarm_sdk.calibration`, shared with RL deployment
 rather than reimplemented here.
 
 It is **seeded offline** from measured travel plus the URDF's joint limits.

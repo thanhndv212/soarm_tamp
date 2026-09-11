@@ -12,6 +12,18 @@ physical arm yet — see "Not yet done" below.
 
 ### Changed
 
+- Import paths updated for `soarm_sdk`'s package reorganization
+  (`soarm_sdk.frame_calibration` → `soarm_sdk.calibration.frame`,
+  `soarm_sdk.servo_robot` → `soarm_sdk.robot`). Cosmetic only: the SDK keeps
+  deprecation shims at the old paths, so this would have kept working
+  untouched. Behaviour is unchanged — `execute.py --dry-run` produces a
+  byte-identical plan summary before and after.
+- Deliberately **not** adopted from the reorganized SDK: `NullRobot` and
+  `soarm_sdk.trajectory.resample()`. Both are used on the `--dry-run` path,
+  which `execute.py` keeps runnable inside the HPP planning container where
+  `soarm_sdk` is not installed at all; importing either would reintroduce
+  exactly the dependency the deferred import at `execute.py:157` avoids.
+
 - **Hardware access consolidated onto `soarm_sdk`**; the lerobot path is
   gone. The URDF-to-servo mapping moved into
   `soarm_sdk.frame_calibration`, so it is shared with RL deployment rather

@@ -19,7 +19,7 @@ What it does beyond "send the waypoints"
   trajectory at all. It is inserted here at the phase boundaries the
   manifest labels: close after the grasp segments, open after the dock.
 * **Refuses an unvalidated calibration.** The URDF-to-servo mapping lives
-  in soarm_sdk now (``soarm_sdk.frame_calibration``), and its direction
+  in soarm_sdk now (``soarm_sdk.calibration``), and its direction
   signs are assumed until someone checks them on the arm. Streaming a
   planned trajectory against a guess is how a gripper ends up under the
   table, so this exits instead.
@@ -158,7 +158,7 @@ def run(
         # of which has a serial stack.
         import numpy as np
 
-        from soarm_sdk.servo_robot import ServoRobot
+        from soarm_sdk.robot import ServoRobot
 
         # The SDK enforces joint limits and the per-step bound; this module
         # resamples so those clamps should never actually fire. If they do,
