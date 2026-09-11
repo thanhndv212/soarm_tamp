@@ -22,7 +22,7 @@ contract between them is a **waypoint manifest on disk**:
 | Scene, grasp semantics, masked 5-DOF handle | working |
 | Planning: 3 phases, 6 segments, 0 seam violations | working |
 | Trajectory within servo-reachable bounds | verified, 0 clamped |
-| Joint sign calibration | **not done — needs the arm** |
+| Joint sign calibration | seeded offline; **validation needs the arm** |
 | Run on hardware | **not done — arm was not connected** |
 
 Everything up to the hardware boundary has been run and verified. The last
@@ -41,8 +41,13 @@ signs are measured (see *Joint conventions* below).
 # 3. check what would be sent, no hardware needed
 python -m soarm_tamp.execute runs/cube01 --dry-run
 
-# 4. ONCE per arm: measure the joint signs (torque off, arm moved by hand)
-python -m soarm_tamp.calibrate_conventions --port /dev/cu.usbmodemXXXX
+# 4a. ONCE per arm: seed a calibration from measured travel (offline)
+python -m soarm_sdk.seed_calibration \
+  --lerobot ~/.cache/huggingface/lerobot/calibration/robots/so101_follower/thanh_arm.json \
+  --arm-id thanh_arm
+
+# 4b. ONCE per arm: confirm it on the arm (torque off first, then small moves)
+python -m soarm_tamp.validate_calibration --port /dev/cu.usbmodemXXXX
 
 # 5. run it
 python -m soarm_tamp.execute runs/cube01 --port /dev/cu.usbmodemXXXX
@@ -77,17 +82,21 @@ usable yaw at every candidate spot, so this costs no reachability.
 
 ## Joint conventions — read this before running on hardware
 
-The planning URDF and `soarm_sdk` do not share a joint convention.
-Offsets are recoverable by comparing the two limit tables
-(`shoulder_lift` ≈ −π/2, `elbow_flex` ≈ +π/2, others ~0). **Signs are
-not.** Five of six URDF ranges are symmetric about zero, and a symmetric
-range fits its servo counterpart equally well either way round — the
-information is not in the files.
+The planning URDF, `soarm_sdk` and lerobot each use a different joint-angle
+zero, and until now no code related any of them to the URDF's. That mapping
+now lives in `soarm_sdk.frame_calibration`, shared with RL deployment
+rather than reimplemented here.
 
-A wrong sign drives the arm into the table rather than over it, so
-`execute.py` refuses to run until `calibrate_conventions.py` has measured
-them. That tool disables servo torque and only reads, so the arm cannot
-move under power while the question is open.
+It is **seeded offline** from measured travel plus the URDF's joint limits.
+The seed cannot recover the direction signs — a travel range says how far a
+joint moves, not which end is which — so it is written `validated: false`
+and `execute.py` refuses to stream against it. `validate_calibration.py`
+settles the signs with the arm limp (torque off, read only), then
+re-confirms under power, then requires a tape-measure FK check before
+marking the file validated.
+
+Joint limits and a per-step bound are enforced inside the SDK, so they
+apply to every caller, not just to trajectories that come through here.
 
 ## Layout
 
@@ -98,8 +107,8 @@ move under power while the question is open.
 | `config/cube_pick_place.yaml` | container | The `long_tamp` task config. |
 | `plan.py` | container | Plans and writes the waypoint manifest. |
 | `replay.py` | container | Replays a manifest in the viser 3-D viewer. |
-| `conventions.py` | host | URDF↔servo mapping, and safe planning bounds. |
-| `calibrate_conventions.py` | host | Measures the joint signs on the real arm. |
+| `conventions.py` | host | Finds the calibration; derives planning bounds. |
+| `validate_calibration.py` | host | Confirms the calibration on the real arm. |
 | `execute.py` | host | Resamples the manifest and streams it to the servos. |
 | `studies/reachability.py` | container | Reproduces every constant in `geometry.py`. |
 

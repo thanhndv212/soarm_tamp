@@ -18,9 +18,16 @@ What it does beyond "send the waypoints"
   constraint, not simulated fingers — so opening and closing is not in the
   trajectory at all. It is inserted here at the phase boundaries the
   manifest labels: close after the grasp segments, open after the dock.
-* **Refuses unverified conventions.** See conventions.py: the URDF->servo
-  signs cannot be derived from the models, only measured. Without a
-  verification file this exits rather than guessing at speed.
+* **Refuses an unvalidated calibration.** The URDF-to-servo mapping lives
+  in soarm_sdk now (``soarm_sdk.frame_calibration``), and its direction
+  signs are assumed until someone checks them on the arm. Streaming a
+  planned trajectory against a guess is how a gripper ends up under the
+  table, so this exits instead.
+
+Safety is the SDK's job, not this module's: joint limits and a per-step
+bound are enforced inside ``ServoHardwareInterface``, so they hold for
+every caller rather than only for trajectories that happen to come through
+here. The counters are read back at the end of a run.
 """
 
 from __future__ import annotations
@@ -99,23 +106,35 @@ def run(
     max_step: float,
     force: bool,
 ) -> int:
-    conv = conventions.load()
+    cal = None
+    problems: list[str] = ["no calibration loaded"]
+    try:
+        cal = conventions.load_calibration()
+        problems = conventions.check_ready(cal)
+    except FileNotFoundError as exc:
+        problems = [str(exc)]
+    except ImportError:
+        problems = ["soarm_sdk is not importable on this machine"]
+
     print("=" * 70)
     print("SO-101 trajectory replay")
     print("=" * 70)
-    print(f"  manifest   : {run_dir}")
-    print(f"  convention : {conv.source}")
-    print(f"  verified   : {conv.verified}")
-    print(f"  mode       : {'DRY RUN' if dry_run else 'LIVE HARDWARE'}")
+    print(f"  manifest    : {run_dir}")
+    if cal is not None:
+        print(f"  calibration : {conventions.calibration_path()}")
+        print(f"  arm         : {cal.arm_id}")
+        print(f"  validated   : {cal.validated}")
+    print(f"  mode        : {'DRY RUN' if dry_run else 'LIVE HARDWARE'}")
 
-    if not conv.verified and not dry_run and not force:
+    if problems and not dry_run and not force:
+        print("\nREFUSING TO RUN:", file=sys.stderr)
+        for pr in problems:
+            print(f"  - {pr}", file=sys.stderr)
         print(
-            "\nREFUSING TO RUN.\n"
-            "  The URDF->servo joint signs have never been measured on this\n"
-            "  arm. They are not derivable from the models (see\n"
-            "  conventions.py), and a wrong sign drives the arm into the\n"
-            "  table rather than over it.\n\n"
-            "  Fix: python -m soarm_tamp.calibrate_conventions --port ...\n"
+            "\n  A planned trajectory is open-loop: nothing notices if the\n"
+            "  mapping is wrong until the arm has already moved. Validate\n"
+            "  first:\n"
+            "    python -m soarm_tamp.validate_calibration --port ...\n"
             "  Override at your own risk with --force.",
             file=sys.stderr,
         )
@@ -128,55 +147,69 @@ def run(
 
     jaw = _gripper_plan(segments)
     total_raw = sum(len(s["q"]) for s in segments)
-    print(f"  segments   : {len(segments)} ({total_raw} planned waypoints)")
-    print(f"  jaw actions: {[(i, a) for i, a in sorted(jaw.items())]}")
+    print(f"  segments    : {len(segments)} ({total_raw} planned waypoints)")
+    print(f"  jaw actions : {[(i, a) for i, a in sorted(jaw.items())]}")
     print("=" * 70)
 
     robot = None
     if not dry_run:
-        from soarm_sdk.hardware_interface import ServoHardwareInterface
-        from soarm_sdk.robot import load_robot_config
+        # Imported here, not at module scope: --dry-run must stay runnable
+        # anywhere, including in CI and in the planning container, neither
+        # of which has a serial stack.
+        import numpy as np
 
-        robot = ServoHardwareInterface(load_robot_config("soarm100"), port=port)
-        robot.start()
+        from soarm_sdk.servo_robot import ServoRobot
+
+        # The SDK enforces joint limits and the per-step bound; this module
+        # resamples so those clamps should never actually fire. If they do,
+        # the counters at the end say so.
+        robot = ServoRobot(
+            port=port,
+            calibration=cal,
+            max_step_rad=max_step,
+            enforce_limits=True,
+        )
+        robot.connect()
 
     period = 1.0 / rate_hz
-    n_sent = n_clamped = 0
+    n_sent = 0
     try:
         for seg in segments:
             qs = _resample(seg["q"], max_step)
             print(
                 f"[{seg['index']:03d}] {seg['kind']:<7} {len(seg['q']):>4} -> "
-                f"{len(qs):>5} pts  {seg['edge']}"
+                f"{len(qs):>5} pts  {seg['edge']}",
+                flush=True,
             )
             for q_urdf in qs:
-                q_servo, n = conv.clamp_servo(conv.urdf_to_servo(q_urdf))
-                n_clamped += n
                 n_sent += 1
                 if robot is not None:
-                    robot.set_robot_joint_positions(q_servo)
+                    robot.set_joint_positions(np.asarray(q_urdf, dtype=float))
                     time.sleep(period)
             action = jaw.get(seg["index"])
             if action:
                 deg = GRIPPER_CLOSED_DEG if action == "close" else GRIPPER_OPEN_DEG
-                print(f"        jaw -> {action.upper()} ({deg:+.0f} deg)")
+                print(f"        jaw -> {action.upper()} ({deg:+.0f} deg)", flush=True)
                 if robot is not None:
-                    q = list(conv.servo_to_urdf(robot.get_robot_joint_positions()))
+                    q = list(robot.get_joint_positions())
                     q[5] = math.radians(deg)
-                    robot.set_robot_joint_positions(
-                        conv.clamp_servo(conv.urdf_to_servo(q))[0]
-                    )
+                    robot.set_joint_positions(np.asarray(q, dtype=float))
                     time.sleep(0.6)
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
         return 130
     finally:
         if robot is not None:
-            robot.stop()
+            hw = robot.hw
+            print("=" * 70)
+            print(f"  limit clamps : {hw.limit_clamps}", end="")
+            print("   <-- plan asked for an unreachable pose" if hw.limit_clamps else "")
+            print(f"  step clamps  : {hw.step_clamps}", end="")
+            print("   <-- arm lagging the plan" if hw.step_clamps else "")
+            robot.disconnect()
 
     print("=" * 70)
     print(f"  commands sent : {n_sent}")
-    print(f"  clamped       : {n_clamped}" + ("  <-- INVESTIGATE" if n_clamped else ""))
     print(f"  duration      : ~{n_sent * period:.1f}s at {rate_hz:.0f} Hz")
     print("=" * 70)
     return 0
@@ -194,7 +227,9 @@ def main() -> None:
         default=0.02,
         help="max per-joint motion per command, rad (default 0.02 ~ 1.1 deg)",
     )
-    ap.add_argument("--force", action="store_true", help="run with unverified signs")
+    ap.add_argument(
+        "--force", action="store_true", help="run against an unvalidated calibration"
+    )
     a = ap.parse_args()
     d = Path(a.run_dir)
     if not d.is_absolute():

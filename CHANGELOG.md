@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Initial development. Nothing released yet, and nothing has run on the
 physical arm yet — see "Not yet done" below.
 
+### Changed
+
+- **Hardware access consolidated onto `soarm_sdk`**; the lerobot path is
+  gone. The URDF-to-servo mapping moved into
+  `soarm_sdk.frame_calibration`, so it is shared with RL deployment rather
+  than reimplemented here, and joint-limit and step-size clamping are
+  enforced inside the SDK for every caller.
+- `conventions.py` shrank to the planning-specific part: finding the
+  calibration, refusing an unvalidated one, and deriving planning bounds
+  from measured travel. Its previous hand-derived offsets and assumed
+  signs are superseded.
+- `calibrate_conventions.py` replaced by `validate_calibration.py`, which
+  walks three escalating rungs — torque-off hand check, single-joint moves
+  under power, then a tape-measure FK check — and marks the calibration
+  validated only if all three pass.
+
 ### Added
 
 - Long-horizon TAMP planning (`long_tamp` on HPP) for a physical SO-101,
@@ -26,10 +42,10 @@ physical arm yet — see "Not yet done" below.
   records it as a `PathRecorder` waypoint manifest.
 - `replay.py` — replays a recorded manifest in the viser 3-D viewer
   without replanning, so what you watch is what `execute.py` would send.
-- `conventions.py` — the URDF↔servo joint mapping, plus
-  `safe_planning_bounds()`.
-- `calibrate_conventions.py` — measures the joint signs on the real arm
-  with servo torque disabled, reading only.
+- `conventions.py` — finds the arm's calibration, refuses an unvalidated
+  one, and derives planning bounds from its measured travel.
+- `validate_calibration.py` — confirms a seeded calibration on the real
+  arm across three escalating rungs, starting with torque disabled.
 - `execute.py` — resamples a manifest and streams it to the servos via
   `soarm_sdk`.
 - `studies/reachability.py` — reproduces every constant in `geometry.py`
@@ -58,10 +74,9 @@ physical arm yet — see "Not yet done" below.
 
 ### Not yet done
 
-- Joint signs have never been measured on the physical arm. They are not
-  derivable from the models — five of six URDF ranges are symmetric about
-  zero — so `execute.py` refuses to stream until
-  `calibrate_conventions.py` has run.
+- The calibration is seeded but not validated. The direction signs are
+  assumed +1 and have never been checked on this arm, so `execute.py`
+  refuses to stream until `validate_calibration.py` has confirmed them.
 - Nothing has been run on hardware. Everything up to that boundary has
   been verified: 3 phases, 6 segments, 0 seam violations, 0 commands
   clamped in a dry run.
