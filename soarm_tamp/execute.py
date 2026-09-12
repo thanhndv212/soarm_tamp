@@ -595,7 +595,7 @@ def run(
         # An unpaced dry run sends nothing and sleeps for nothing, so its
         # wall clock says nothing about the run. --pace makes it mean
         # something; so does hardware.
-        print(f"  duration      : n/a (nothing was streamed; try --pace)")
+        print("  duration      : n/a (nothing was streamed; try --pace)")
     print("=" * 70)
     return 0
 
