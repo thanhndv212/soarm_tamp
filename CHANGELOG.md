@@ -10,6 +10,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Initial development. Nothing released yet, and nothing has run on the
 physical arm yet — see "Not yet done" below.
 
+### Fixed
+
+- **`validate_calibration` could not complete any of its three rungs.**
+  Rung 1 needs the arm limp, but `ServoRobot.connect()` enables torque and
+  the SDK exposed no way to release it, so the script fell back to asking the
+  operator to cut the servo supply — which takes the bus down too, leaving
+  the position reads the check depends on returning a placeholder. It now
+  calls `ServoRobot.disable_torque()` (new in soarm-sdk) and re-enables
+  before rung 2. Rungs 2 and 3 issued a single `set_joint_positions` per
+  target, but the `max_step_rad=0.05` this script passes clamps every write
+  to a small delta from the *measured* position — so the arm moved 0.05 rad
+  and stopped, and rung 3 had the operator tape-measuring a pose it never
+  reached. Both now step to the target and report if it is not reached.
+- **A dead bus read no longer masquerades as a stationary arm.**
+  `ServoHardwareInterface` serves 2048 ticks per joint until its first
+  successful sync-read, so a silent bus produced constant, plausible angles;
+  each rung compares two reads, and two reads of the same stale cache differ
+  by zero, which surfaced as "you did not move it far enough". The run now
+  aborts up front unless the arm has actually been read.
+
 ### Added
 
 - **`--dry-run` now reports how many commands would be clamped.** The plan
