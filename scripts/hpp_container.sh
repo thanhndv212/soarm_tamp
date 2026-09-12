@@ -6,6 +6,7 @@
 #
 #   ./scripts/hpp_container.sh up        create (or recreate) the container
 #   ./scripts/hpp_container.sh plan ...  run soarm_tamp.plan inside it
+#   ./scripts/hpp_container.sh tcp ...   run soarm_tamp.plan_tcp inside it
 #   ./scripts/hpp_container.sh replay ... replay a manifest in the viser viewer
 #   ./scripts/hpp_container.sh shell     interactive shell with HPP sourced
 #   ./scripts/hpp_container.sh exec ...  run an arbitrary command inside it
@@ -54,6 +55,9 @@ case "${1:-}" in
   replay) ensure; shift
          docker exec -i "$NAME" bash -c \
            "${ENVSETUP}; cd ${CHOME}/devel/soarm-ws/soarm_tamp && python3 -u -m soarm_tamp.replay $*" ;;
+  tcp)   ensure; shift
+         docker exec -i "$NAME" bash -c \
+           "${ENVSETUP}; cd ${CHOME}/devel/soarm-ws/soarm_tamp && python3 -u -m soarm_tamp.plan_tcp $*" ;;
   plan)  ensure; shift
          docker exec -i "$NAME" bash -c \
            "${ENVSETUP}; cd ${CHOME}/devel/soarm-ws/soarm_tamp && python3 -u -m soarm_tamp.plan $*" ;;
