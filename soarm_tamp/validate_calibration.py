@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+import time
 
 from . import conventions
 
@@ -64,21 +65,86 @@ def _confirm(prompt: str) -> bool:
     return input(f"  {prompt} [y/N] ").strip().lower().startswith("y")
 
 
+def _move_to(robot, target, *, tol_rad: float = 0.02, timeout_s: float = 40.0) -> bool:
+    """Walk the arm to *target*, one bounded step per bus write.
+
+    ``ServoRobot`` is constructed here with ``max_step_rad``, which clamps
+    every write to a small delta from the *measured* position — so a single
+    ``set_joint_positions`` moves a fraction of the way and stops. That is the
+    right behaviour for streaming a planned trajectory and the wrong one for
+    "go to this pose and hold still while I measure it": the arm would sit
+    0.05 rad from a pose the operator then tape-measures as if it had arrived.
+    Re-issuing the same target walks it in, and the clamp keeps each step
+    small on the way.
+
+    Returns False if it has not converged before *timeout_s*, which is what a
+    joint clamped at a limit looks like.
+    """
+    import numpy as np
+
+    # Compare against what the arm is *allowed* to reach, not what was asked.
+    # ServoRobot enforces the config's limits intersected with measured travel,
+    # so a joint whose current pose sits outside them — the gripper here, whose
+    # URDF lower limit is tighter than its real travel — can never close the
+    # gap to an unclamped target. Left unclamped, that one joint keeps every
+    # move "unconverged" and burns the whole timeout on each call.
+    lo, hi = robot.effective_joint_limits()
+    target = np.clip(np.asarray(target, dtype=float), lo, hi)
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if float(np.max(np.abs(target - robot.get_joint_positions()))) <= tol_rad:
+            return True
+        robot.set_joint_positions(target)
+        time.sleep(0.15)
+    err = float(np.max(np.abs(target - robot.get_joint_positions())))
+    print(f"    did not converge: still {err:.3f} rad away after {timeout_s:.0f}s")
+    return False
+
+
+def _wait_for_live_state(robot, timeout_s: float = 3.0) -> bool:
+    """Refuse to start until the arm has actually been read at least once.
+
+    ``ServoHardwareInterface`` seeds its position cache with 2048 ticks per
+    joint and serves that until a sync-read succeeds, so a bus that never
+    answers produces plausible-looking constant angles rather than an error.
+    Every rung here compares two position reads, and two reads of the same
+    stale cache differ by exactly zero — which reads as "you did not move it
+    far enough" rather than as "nothing was measured".
+    """
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if robot.hw.state_age() < 1.0:
+            return True
+        time.sleep(0.05)
+    print(
+        f"\nNo servo state read within {timeout_s:.0f}s "
+        f"({robot.hw.read_errors} failed reads).",
+        file=sys.stderr,
+    )
+    print("  The angles below would be a placeholder, not the arm. Check the")
+    print("  bus power and the port, then re-run.", file=sys.stderr)
+    return False
+
+
 def rung1_read_only(robot, cal) -> bool:
     """Hand-move each joint; confirm the reported angle moves the right way."""
     print("\n" + "=" * 70)
     print("RUNG 1 — read only, torque OFF. The arm is limp; support it.")
     print("=" * 70)
-    for attr in ("disable_torque", "torque_off"):
-        fn = getattr(robot.hw, attr, None)
-        if callable(fn):
-            fn()
-            break
-    else:
-        print("  WARNING: no torque-disable call found on this SDK build.")
-        print("  Power the servos down before continuing.", file=sys.stderr)
-        if not _confirm("Servos are safe to move by hand?"):
-            return False
+    print("  Support the arm before continuing — shoulder_lift and elbow_flex")
+    print("  carry its weight and will drop the moment torque is released.")
+    if not _confirm("Holding the arm?"):
+        return False
+    try:
+        robot.disable_torque()
+    except (AttributeError, RuntimeError) as exc:
+        # Cutting the supply instead is not a substitute: it takes the bus
+        # down too, and the joint angles this rung compares would then be
+        # the interface's initial cache rather than anything measured.
+        print(f"  Cannot release torque: {exc}", file=sys.stderr)
+        print("  This SDK build has no working torque control; rung 1 cannot run.")
+        return False
+    print("  Torque released — the arm is limp and the bus is still live.")
 
     flipped: list[str] = []
     for idx, name in enumerate(conventions.JOINT_ORDER[:5]):
@@ -112,18 +178,22 @@ def rung2_single_joint(robot) -> bool:
     print("=" * 70)
     if not _confirm("Arm is clear of the table and of itself?"):
         return False
-    import numpy as np
+
+    # Rung 1 left the arm limp; take the weight again before commanding it.
+    robot.enable_torque()
 
     for idx, name in enumerate(conventions.JOINT_ORDER[:5]):
         q = list(robot.get_joint_positions())
         print(f"\n[{idx + 1}/5] {name}: +0.1 rad — expect {POSITIVE_IS[name]}")
         q[idx] += 0.1
-        robot.set_joint_positions(np.asarray(q, dtype=float))
+        if not _move_to(robot, q):
+            print(f"  STOP: {name} could not reach +0.1 rad.")
+            return False
         if not _confirm("Did it move that way?"):
             print(f"  STOP: {name} does not move as the calibration says.")
             return False
         q[idx] -= 0.1
-        robot.set_joint_positions(np.asarray(q, dtype=float))
+        _move_to(robot, q)
     return True
 
 
@@ -138,13 +208,14 @@ def rung3_fk_check(robot, tol_mm: float) -> bool:
     print("  Measure from the robot base origin, in millimetres.\n")
     if not _confirm("Arm is clear and you have a ruler?"):
         return False
-    import numpy as np
 
     worst = 0.0
     for label, q in FK_POSES:
         print(f"\n  pose: {label}")
         print(f"    q = {[round(v, 3) for v in q]}")
-        robot.set_joint_positions(np.asarray(q, dtype=float))
+        if not _move_to(robot, q):
+            print(f"    STOP: could not reach '{label}'; nothing to measure.")
+            return False
         input("    Press Enter once it has settled... ")
         try:
             got = [float(v) for v in input("    measured TCP x,y,z in mm: ").split(",")]
@@ -186,6 +257,8 @@ def main() -> None:
     )
     robot.connect()
     try:
+        if not _wait_for_live_state(robot):
+            return sys.exit(2)
         if not rung1_read_only(robot, cal):
             return sys.exit(1)
         if not rung2_single_joint(robot):

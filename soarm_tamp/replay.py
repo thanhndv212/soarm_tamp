@@ -8,6 +8,21 @@ RUNS INSIDE THE PLANNING CONTAINER (needs pyhpp + pyhpp_viser):
 Then open the URL it prints. The container uses host networking, so
 viser's port is reachable straight from macOS.
 
+Two modes:
+
+* **replay** (default) — step the recorded waypoints at a fixed rate.
+* **``--follow``** — mirror the real arm. ``soarm_tamp.execute`` appends
+  every command it issues to ``<run>/live.jsonl``; this tails that file
+  and shows each one as it lands. Planning and execution still never
+  share a process — the run directory is bind-mounted into the container,
+  so a file is all they need. Start this first, then run ``execute``:
+
+      scripts/hpp_container.sh replay --run runs/tcp01 --follow   # here
+      python -m soarm_tamp.execute runs/tcp01 --port /dev/cu...   # host
+
+  With no arm to hand, ``execute ... --dry-run --pace`` drives the mirror
+  at the speed the real run would take.
+
 This rebuilds the scene but does NOT replan — it loads the manifest
 ``soarm_tamp.plan`` already wrote and steps the configurations through the
 viewer. That is the point: replay is a pure visualization problem, cheap
@@ -27,12 +42,33 @@ import sys
 import time
 from pathlib import Path
 
+from .execute import N_ARM_JOINTS, TRACE_NAME
 from .plan import CubePickPlaceTask, FREEZE_JOINT_SUBSTRINGS
 
 _HERE = Path(__file__).parent
 
 # pyhpp_viser.Viewer.start(port=8000) — see run() for why this is not 8080.
 VISER_DEFAULT_PORT = 8000
+
+
+def _frame_period(segments, fps: float) -> tuple[float, str]:
+    """Seconds per waypoint, and how that was decided.
+
+    A time-parameterized plan's waypoints are samples in TIME, dt apart,
+    so showing them dt apart replays the motion at the speed it was
+    planned to run — accel and decel included. Playing the same rows at an
+    arbitrary fps just rescales the whole thing, which is misleading when
+    the point of looking is to check the speed profile.
+    """
+    dts = {
+        float(rec.get("dt") or 0)
+        for rec, _ in segments
+        if rec.get("time_parameterized") and rec.get("dt")
+    }
+    if len(dts) == 1:
+        dt = dts.pop()
+        return dt, f"the plan's own timing (dt={dt:.3f}s, {1 / dt:.0f} fps)"
+    return 1.0 / fps, f"{fps:.0f} fps (plan carries no timing)"
 
 
 def _load_waypoints(run_dir: Path) -> list[tuple[dict, list[list[float]]]]:
@@ -44,7 +80,99 @@ def _load_waypoints(run_dir: Path) -> list[tuple[dict, list[list[float]]]]:
     return out
 
 
-def run(run_dir: Path, fps: float, loops: int, hold: float) -> int:
+def _tail(path: Path, poll: float, idle_timeout: float):
+    """Yield batches of trace records as they are appended to *path*.
+
+    Batches, not records: the arm is commanded at 30 Hz and the viewer
+    redraws slower than that, so a follower that rendered every line would
+    fall further behind the real arm the longer it ran. The caller draws
+    only the newest record of each batch, which keeps the picture on the
+    arm instead of on its past.
+
+    A line without a trailing newline is a write caught mid-flight; it is
+    held back and re-read rather than parsed.
+    """
+    deadline = time.time() + idle_timeout
+    while not path.exists():
+        if time.time() > deadline:
+            print(f"  no {path.name} appeared in {idle_timeout:.0f}s", flush=True)
+            return
+        time.sleep(poll)
+
+    with path.open() as fh:
+        buf = ""
+        while True:
+            chunk = fh.read()
+            if chunk:
+                deadline = time.time() + idle_timeout
+                buf += chunk
+                *lines, buf = buf.split("\n")
+                batch = []
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    try:
+                        batch.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+                if batch:
+                    yield batch
+            else:
+                if time.time() > deadline:
+                    print(f"  nothing for {idle_timeout:.0f}s; stopping", flush=True)
+                    return
+                time.sleep(poll)
+
+
+def follow(run_dir: Path, task, base_q: list[float], poll: float, idle: float) -> int:
+    """Mirror the live command stream from soarm_tamp.execute.
+
+    The trace carries the six arm joints — that is what goes to the servos
+    and nothing else is measured — so the rest of the configuration (the
+    table and the cube) is held at the manifest's own starting values.
+    The viewer therefore shows the arm as commanded inside the scene it
+    was planned in, which is the comparison worth looking at.
+    """
+    trace = run_dir / TRACE_NAME
+    print(f"  following : {trace}")
+    print("  waiting for soarm_tamp.execute to start ...", flush=True)
+
+    q = list(base_q)
+    shown = 0
+    for batch in _tail(trace, poll, idle):
+        for rec in batch:
+            if rec.get("event") == "start":
+                print(f"  execute started (dry_run={rec.get('dry_run')})", flush=True)
+            if rec.get("jaw"):
+                print(f"        jaw -> {rec['jaw'].upper()}", flush=True)
+            if rec.get("event") == "done":
+                print(
+                    f"  execute finished after {rec.get('commands')} commands "
+                    f"({shown} frames mirrored)"
+                )
+                return 0
+        latest = next(
+            (r for r in reversed(batch) if isinstance(r.get("q"), list)), None
+        )
+        if latest is None:
+            continue
+        q[:N_ARM_JOINTS] = latest["q"][:N_ARM_JOINTS]
+        task.planner.visualize(q)
+        shown += 1
+        if shown % 50 == 0:
+            print(f"  ... {latest.get('i')} commands mirrored", flush=True)
+    return 0
+
+
+def run(
+    run_dir: Path,
+    fps: float,
+    loops: int,
+    hold: float,
+    follow_live: bool = False,
+    poll: float = 0.02,
+    idle: float = 120.0,
+) -> int:
     segments = _load_waypoints(run_dir)
     if not segments:
         print(f"no segments in {run_dir}", file=sys.stderr)
@@ -83,10 +211,15 @@ def run(run_dir: Path, fps: float, loops: int, hold: float) -> int:
     print("=" * 70)
     print("  Ctrl+C to stop.\n", flush=True)
 
+    dt, how = _frame_period(segments, fps)
+    print(f"  playback : {how}")
+
     task.planner.visualize(segments[0][1][0])
     time.sleep(hold)
 
-    dt = 1.0 / fps
+    if follow_live:
+        return follow(run_dir, task, segments[0][1][0], poll, idle)
+
     try:
         loop = 0
         while loops == 0 or loop < loops:
@@ -117,11 +250,23 @@ def main() -> None:
     ap.add_argument(
         "--hold", type=float, default=0.6, help="pause at each phase boundary (s)"
     )
+    ap.add_argument(
+        "--follow",
+        action="store_true",
+        help=f"mirror the arm live from <run>/{TRACE_NAME} instead of replaying",
+    )
+    ap.add_argument("--poll", type=float, default=0.02, help="--follow poll period (s)")
+    ap.add_argument(
+        "--idle",
+        type=float,
+        default=120.0,
+        help="--follow gives up after this long with no new command (s)",
+    )
     a = ap.parse_args()
     d = Path(a.run)
     if not d.is_absolute():
         d = _HERE.parent / d
-    sys.exit(run(d, a.fps, a.loops, a.hold))
+    sys.exit(run(d, a.fps, a.loops, a.hold, a.follow, a.poll, a.idle))
 
 
 if __name__ == "__main__":
