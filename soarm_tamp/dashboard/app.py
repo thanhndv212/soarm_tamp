@@ -34,7 +34,7 @@ def build_app(
     use_stream: bool = True,
 ):
     from soarm_sdk.dashboard import DashboardApp
-    from soarm_sdk.dashboard.panels import monitor, setup
+    from soarm_sdk.dashboard.panels import calibration, monitor, setup
 
     from .panels.pickplace import build_pickplace_panel
     from .panels.tcp import build_tcp_panel
@@ -53,6 +53,12 @@ def build_app(
     # this tab having been used first, which is why it comes first.
     for panel in setup.build_all(fk_update_fn=app.fk_update):
         app.register(panel)
+
+    # Before the planning tabs, because they depend on it: every angle they
+    # plan, stream and render is a tick reading interpreted through the
+    # calibration, so a mirror that disagrees with the arm means the planner
+    # disagrees with it too. This tab is where that is checked and corrected.
+    app.register(calibration.build_calibration_panel())
 
     # The planning tabs drive the same 3-D view, so a replayed or executed
     # trajectory shows up in the same place the live arm does.
