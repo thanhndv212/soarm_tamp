@@ -113,7 +113,12 @@ def _quaternion_starts(config_size: int) -> list[int]:
     return [n_joints + 7 * i + 3 for i in range(n_objects)]
 
 
-def run(out_dir: Path, backend: str = "pyhpp", viewer: str = "auto") -> bool:
+def run(
+    out_dir: Path,
+    backend: str = "pyhpp",
+    viewer: str = "auto",
+    start_file: Path | None = None,
+) -> bool:
     task = CubePickPlaceTask(backend=backend, viewer_type=viewer)
 
     print("=" * 70)
@@ -123,6 +128,7 @@ def run(out_dir: Path, backend: str = "pyhpp", viewer: str = "auto") -> bool:
     print(f"  objects   : {task.task_config.OBJECTS}")
     print(f"  grippers  : {task.task_config.GRIPPERS}")
     print(f"  frozen    : {FREEZE_JOINT_SUBSTRINGS}")
+    print(f"  start     : {start_file or 'URDF zero pose (from the YAML)'}")
     print(f"  out       : {out_dir}")
     print("=" * 70)
 
@@ -142,6 +148,23 @@ def run(out_dir: Path, backend: str = "pyhpp", viewer: str = "auto") -> bool:
     if not q_init:
         print("FAILED: no initial configuration")
         return False
+
+    if start_file is not None:
+        # Imported here, not at module scope: plan_tcp imports _loader and
+        # _quaternion_starts from this module, so a top-level import either
+        # way round is a cycle.
+        from .plan_tcp import apply_start_pose
+
+        try:
+            q_init = apply_start_pose(task, start_file)
+        except RuntimeError as exc:
+            # An out-of-bounds start is an ordinary outcome here, not a bug:
+            # the arm's measured travel is wider than the URDF's limits, so a
+            # joint resting past them is exactly what a slumped arm looks
+            # like. Report it the way every other failure in this file is.
+            print(f"\nFAILED: {exc}")
+            return False
+
     print(f"   scene ready, {len(q_init)} DOF")
 
     print("\n2. Planning ...")
@@ -189,11 +212,22 @@ def main() -> None:
     ap.add_argument("--out", default="runs/cube01", help="manifest output directory")
     ap.add_argument("--backend", default="pyhpp")
     ap.add_argument("--viewer", default="auto", help="viser, gepetto, auto, or none")
+    ap.add_argument(
+        "--start",
+        type=Path,
+        default=None,
+        help="JSON pose from soarm_tamp.read_pose: plan from where the arm "
+        "actually is. Without it the plan begins at the YAML's zero pose, and "
+        "the servos slew there first along a path nothing collision-checked.",
+    )
     args = ap.parse_args()
     out = Path(args.out)
     if not out.is_absolute():
         out = _HERE.parent / out
-    sys.exit(0 if run(out, args.backend, args.viewer) else 1)
+    start = args.start
+    if start is not None and not start.is_absolute():
+        start = _HERE.parent / start
+    sys.exit(0 if run(out, args.backend, args.viewer, start) else 1)
 
 
 if __name__ == "__main__":
