@@ -467,6 +467,7 @@ def run(
         },
     )
     summary = recorder.close()
+    conventions.write_scene(out_dir)
 
     print("\n" + "=" * 70)
     print("PLANNING SUCCEEDED")

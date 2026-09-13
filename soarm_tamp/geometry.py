@@ -127,3 +127,48 @@ GRIPPER_CLOSED_DEG: float = 5.0
 # --------------------------------------------------------------------------
 TOPDOWN_RADIUS_MIN_M: float = 0.10
 TOPDOWN_RADIUS_MAX_M: float = 0.30
+
+
+
+# Where the cube starts (A) and where it must end up (B), in metres, as
+# (x, y) on the table. Both sit inside the top-down-reachable annulus
+# measured in studies/reachability.py (radius 0.10-0.30 m): |A| = |B| =
+# 0.242 m. Defined here rather than in build_assets because they are scene
+# geometry, and scene_fingerprint below has to record them.
+PICK_XY: tuple[float, float] = (0.22, -0.10)
+PLACE_XY: tuple[float, float] = (0.22, 0.10)
+
+# --------------------------------------------------------------------------
+# Scene fingerprint.
+#
+# A manifest is only executable against the scene it was planned in. Change
+# the cube size or the grasp frame and every waypoint in an existing run
+# refers to geometry that no longer exists — the arm would drive a
+# collision-checked path through an object of the wrong size, or grip at an
+# offset that misses. Nothing in the manifest itself records which scene it
+# came from, so plan.py writes this alongside it and execute.py checks it.
+# --------------------------------------------------------------------------
+def scene_fingerprint() -> dict:
+    """The geometry constants a recorded plan depends on."""
+    return {
+        "cube_size_m": CUBE_SIZE_M,
+        "planning_jaw_deg": PLANNING_JAW_DEG,
+        "grasp_centerline_x_m": round(GRASP_CENTERLINE_X_M, 6),
+        "grasp_depth_z_m": round(GRASP_DEPTH_Z_M, 6),
+        "fingertip_below_tcp_m": FINGERTIP_BELOW_TCP_M,
+        "gripper_open_deg": GRIPPER_OPEN_DEG,
+        "gripper_closed_deg": GRIPPER_CLOSED_DEG,
+        "pick_xy": list(PICK_XY),
+        "place_xy": list(PLACE_XY),
+    }
+
+
+def compare_scene(recorded: dict) -> list[str]:
+    """Differences between *recorded* and the scene as it is now, if any."""
+    current = scene_fingerprint()
+    out: list[str] = []
+    for key, now in current.items():
+        then = recorded.get(key, "<absent>")
+        if then != now:
+            out.append(f"{key}: planned with {then}, scene is now {now}")
+    return out

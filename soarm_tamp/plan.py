@@ -33,6 +33,8 @@ from long_tamp.planning.path_recorder import PathRecorder
 from long_tamp.tasks import ManipulationTask
 from long_tamp.tasks.grasp_sequence import GraspSequencePlanner
 
+from . import conventions
+
 TASK_NAME = "SO-101: cube pick and place"
 
 _HERE = Path(__file__).parent
@@ -169,6 +171,7 @@ def run(out_dir: Path, backend: str = "pyhpp", viewer: str = "auto") -> bool:
     # build on. See PathRecorder.record_phase_results' own docstring.
     recorder.record_phase_results(seq.phase_results)
     summary = recorder.close()
+    conventions.write_scene(out_dir)
 
     print("\n" + "=" * 70)
     if result.get("success"):

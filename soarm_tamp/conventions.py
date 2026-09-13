@@ -116,6 +116,61 @@ def span_warnings(cal: "RobotCalibration") -> list[str]:
     ]
 
 
+SCENE_FILE = "scene.json"
+
+
+def write_scene(run_dir: str | Path) -> Path:
+    """Record the scene a plan was made in, next to its manifest.
+
+    The manifest says where the arm should go, not what the world looked
+    like when that was decided. Change the cube size or the grasp frame and
+    every waypoint in an existing run still loads fine while referring to
+    geometry that no longer exists — so it replays a collision-checked path
+    around an object of the wrong size, or grips at an offset that misses.
+    Cheap to record, and the only way execute.py can tell.
+    """
+    import json
+
+    from .geometry import scene_fingerprint
+
+    path = Path(run_dir) / SCENE_FILE
+    path.write_text(json.dumps(scene_fingerprint(), indent=2) + "\n")
+    return path
+
+
+def check_scene(run_dir: str | Path) -> list[str]:
+    """Reasons this run does not match the scene as it stands now.
+
+    A run with no scene file predates the record and cannot be checked —
+    reported as a problem rather than waved through, since the runs that
+    predate it are exactly the stale ones.
+    """
+    import json
+
+    from .geometry import compare_scene
+
+    path = Path(run_dir) / SCENE_FILE
+    if not path.exists():
+        return [
+            f"no {SCENE_FILE} in {run_dir} — this run predates scene "
+            "recording, so it cannot be checked against the current "
+            "geometry. Re-plan it."
+        ]
+    try:
+        recorded = json.loads(path.read_text())
+    except Exception as exc:
+        return [f"could not read {path}: {exc}"]
+
+    diffs = compare_scene(recorded)
+    if not diffs:
+        return []
+    return [
+        "this run was planned against a different scene: "
+        + "; ".join(diffs)
+        + ". Re-plan it."
+    ]
+
+
 def safe_planning_bounds(cal: "RobotCalibration") -> list[tuple[float, float]]:
     """Joint bounds, in URDF radians, that this arm can actually reach.
 

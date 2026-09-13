@@ -344,6 +344,11 @@ def run(
     except ImportError:
         problems = ["soarm_sdk is not importable on this machine"]
 
+    # A stale manifest is as dangerous as a bad calibration and fails the
+    # same way: everything loads, the numbers look reasonable, and the arm
+    # drives a path checked against a world that no longer exists.
+    problems += conventions.check_scene(run_dir)
+
     print("=" * 70)
     print("SO-101 trajectory replay")
     print("=" * 70)

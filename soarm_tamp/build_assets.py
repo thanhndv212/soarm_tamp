@@ -31,6 +31,8 @@ from .geometry import (
     CUBE_SIZE_M,
     GRASP_CENTERLINE_X_M,
     GRASP_DEPTH_Z_M,
+    PICK_XY,
+    PLACE_XY,
 )
 
 _HERE = Path(__file__).parent
@@ -55,10 +57,15 @@ TABLE_RECESS_M = 0.003
 # (x, y) on the table. Both sit inside the top-down-reachable annulus
 # measured in studies/reachability.py (radius 0.10-0.30 m): |A| = |B| =
 # 0.242 m.
-PICK_XY = (0.22, -0.10)
-PLACE_XY = (0.22, 0.10)
 TABLE_HALF_EXTENT_M = 0.45
-TABLE_THICKNESS_M = 0.04
+# Deep on purpose, not a slab. A thin plate leaves the whole half-space
+# beneath it as free space, so a pose with the hand *under* the table reads
+# as collision-free — only a path that happens to cross the plate is caught.
+# Combined with the fingertips reaching ~8 mm past the TCP frame, a hand
+# resting on the real table could be "valid" in the model. At 1 m the box
+# swallows everything the arm can reach downward, so below-the-table is
+# solid rather than empty. Costs nothing: a box is a box to the checker.
+TABLE_THICKNESS_M = 1.0
 
 
 def _rewrite_mesh_paths(src: Path, dst: Path, mesh_root: str) -> int:
