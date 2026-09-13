@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, List, Optional
 
 from ..container import ContainerJob, available, kill_in_container
+from ..player import ManifestPlayer
 from ..runner import ExecutionJob
 
 __all__ = ["Console", "PlanControls", "VIEWER_PATTERN"]
@@ -18,6 +19,24 @@ __all__ = ["Console", "PlanControls", "VIEWER_PATTERN"]
 #: Matches the viewer process *inside* the container, not the docker
 #: exec client on this side of it.
 VIEWER_PATTERN = "soarm_tamp.replay"
+
+#: Where the container-side viewer publishes.
+VIEWER_PORT = 8000
+
+
+def _wait_for_port_free(timeout: float = 8.0) -> bool:
+    """Block until nothing is listening on the viewer port."""
+    import socket
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with socket.socket() as sk:
+            sk.settimeout(0.3)
+            if sk.connect_ex(("127.0.0.1", VIEWER_PORT)) != 0:
+                return True
+        time.sleep(0.3)
+    return False
 
 
 class Console:
@@ -65,6 +84,59 @@ class PlanControls:
         self.plan_job: Optional[ContainerJob] = None
         self.replay_job: Optional[ContainerJob] = None
         self.exec_job: Optional[ExecutionJob] = None
+        self.player: Optional[ManifestPlayer] = None
+
+    # -- starting where the arm actually is -----------------------------
+
+    def capture_start(self, start_file: Path) -> bool:
+        """Write the arm's measured pose for the container-side planner.
+
+        A plan that begins at the model's zero pose leaves the servos to
+        slew there first, along a path no collision checker ever saw. Both
+        planners take ``--start`` to avoid that; this is the host half.
+
+        Needs the serial port, which the live mirror is holding, so the
+        mirror stands down for the read and comes straight back.
+        """
+        import json
+        import math
+
+        from ...conventions import URDF_LIMITS
+        from ...read_pose import capture
+
+        port = self.ctx.device_h.value
+        if not port:
+            self.console.say("no serial port set in the sidebar")
+            return False
+        was_polling = bool(getattr(self.ctx, "polling", False))
+        try:
+            if was_polling:
+                self.ctx.stop_polling()
+            pose = capture(port, 0.3)
+            start_file = Path(start_file)
+            start_file.parent.mkdir(parents=True, exist_ok=True)
+            start_file.write_text(json.dumps(pose, indent=1) + "\n")
+
+            # A limp arm rests where the URDF says it cannot be, and the
+            # planner refuses such a pose rather than clamping it. Say so
+            # here, where it is fixable, not in the planner's output.
+            bad = [
+                f"{n} {math.degrees(v):+.1f} deg"
+                for n, v in zip(pose["joint_names"], pose["q"])
+                if not URDF_LIMITS[n][0] <= v <= URDF_LIMITS[n][1]
+            ]
+            self.console.say(f"captured pose -> {start_file.name}")
+            if bad:
+                self.console.say("OUT OF BOUNDS: " + ", ".join(bad))
+                self.console.say("lift the arm into range; planning will refuse this")
+                return False
+            return True
+        except Exception as exc:
+            self.console.say(f"capture failed: {exc}")
+            return False
+        finally:
+            if was_polling:
+                self.ctx.start_polling()
 
     # -- planning ------------------------------------------------------
 
@@ -99,7 +171,43 @@ class PlanControls:
         if any(k in line for k in keep):
             self.console.say(line.strip()[:150])
 
-    # -- viewer --------------------------------------------------------
+    # -- playback in this dashboard's own 3-D view ----------------------
+
+    def play(self, *, speed: float = 1.0, loop: bool = False) -> None:
+        """Animate the manifest in the view already on this page.
+
+        No second viser, no second port, no container: the manifest is JSON
+        on this side and the arm is already loaded here. It also means the
+        replayed pose and the measured pose go through exactly the same
+        calibrated tick pipeline, which is what makes comparing them mean
+        anything.
+        """
+        if self.fk_update is None:
+            self.console.say("no 3-D view attached to this panel")
+            return
+        if not (self.run_dir / "manifest.json").exists():
+            self.console.say(f"no manifest at {self.run_dir.name} — plan one first")
+            return
+        if self.player is not None and self.player.running:
+            self.console.say("already playing (stop it first)")
+            return
+        self.player = ManifestPlayer(
+            self.run_dir,
+            self.fk_update,
+            joint_ids=list(self.ctx.joint_ids),
+            speed=speed,
+            loop=loop,
+            on_line=self.console.say,
+        )
+        self.player.start()
+
+    def stop_play(self) -> None:
+        if self.player is not None and self.player.running:
+            self.player.stop()
+        else:
+            self.console.say("nothing playing")
+
+    # -- the container's full-scene viewer (cube, table, grasp frames) ---
 
     def replay(self, *, follow: bool = False) -> None:
         if not self.run_dir.exists():
@@ -113,7 +221,12 @@ class PlanControls:
         # and dies. Clear the ground first.
         stale = kill_in_container(VIEWER_PATTERN)
         if stale:
-            self.console.say(f"cleared {stale} stale viewer process(es)")
+            # pkill returns before the process dies, and the new viewer
+            # cannot bind :8000 until the old one has actually let go.
+            # Starting immediately loses that race and fails with a
+            # traceback that says nothing about why.
+            self.console.say(f"cleared {stale} stale viewer process(es); waiting")
+            _wait_for_port_free()
         args = ["replay", "--run", str(self.run_dir)]
         if follow:
             args.append("--follow")
