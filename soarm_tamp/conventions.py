@@ -85,8 +85,35 @@ def check_ready(cal: "RobotCalibration") -> list[str]:
         problems.append(
             "measured travel disagrees with the URDF on: "
             + ", ".join(cal.suspect_joints)
+            + " — and those joints' zeros were inferred from those same "
+            "limits, so the mapping cannot be trusted. Re-zero them against "
+            "a pose you can verify (soarm_sdk.calibration.rezero_from_pose)."
         )
     return problems
+
+
+def span_warnings(cal: "RobotCalibration") -> list[str]:
+    """Span mismatches worth saying out loud that are not blocking.
+
+    A joint whose zero came from a verified pose is unaffected by the URDF
+    being wrong about how far it travels — that is why it is not in
+    :func:`check_ready`. It still matters for *planning*: the URDF's limits
+    are not this arm's real reach, so plan against ``safe_planning_bounds``
+    rather than the model's own numbers.
+    """
+    informational = [
+        j.name
+        for j in cal.joints
+        if j.span_mismatch and not j.suspect
+    ]
+    if not informational:
+        return []
+    return [
+        "measured travel disagrees with the URDF on: "
+        + ", ".join(informational)
+        + " — zeros are pose-anchored so the mapping stands, but the URDF's "
+        "limits understate this arm's reach; plan against the measured bounds."
+    ]
 
 
 def safe_planning_bounds(cal: "RobotCalibration") -> list[tuple[float, float]]:

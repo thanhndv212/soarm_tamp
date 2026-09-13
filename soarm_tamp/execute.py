@@ -354,6 +354,10 @@ def run(
         print(f"  validated   : {cal.validated}")
     print(f"  mode        : {'DRY RUN' if dry_run else 'LIVE HARDWARE'}")
 
+    if cal is not None:
+        for warning in conventions.span_warnings(cal):
+            print(f"  note        : {warning}")
+
     if problems and not dry_run and not force:
         print("\nREFUSING TO RUN:", file=sys.stderr)
         for pr in problems:
