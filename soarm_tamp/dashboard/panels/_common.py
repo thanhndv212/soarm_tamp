@@ -86,6 +86,34 @@ class PlanControls:
         self.exec_job: Optional[ExecutionJob] = None
         self.player: Optional[ManifestPlayer] = None
 
+    # -- the mirror and the file must agree -----------------------------
+
+    def _calibration_synced(self, action: str) -> bool:
+        """Refuse *action* while the 3-D view and the saved calibration differ.
+
+        Everything below this line converts between ticks and URDF radians,
+        and none of it reads the calibration the mirror is rendering. The
+        planner runs in a container and can see only the file; ``capture``,
+        ``ExecutionJob`` and ``ManifestPlayer`` each load their own copy from
+        it. So an unsaved edit does not mean "not applied yet" — it means the
+        arm you are watching and the arm being planned for are different
+        arms, and the mirror is the half that looks right.
+
+        Better to stop here than to produce a trajectory that is collision-
+        checked against a pose the arm was never in.
+        """
+        try:
+            drift = self.ctx.calibration_drift()
+        except Exception:
+            return True  # an older context with no such notion; do not block
+        if not drift:
+            return True
+        detail = ", ".join(f"{n} {d:+.1f}°" for n, d in drift)
+        self.console.say(f"cannot {action}: the calibration has unsaved changes")
+        self.console.say(f"  the 3-D view is showing {detail} vs. the saved file")
+        self.console.say("  Save it in the Calibration tab, then try again")
+        return False
+
     # -- starting where the arm actually is -----------------------------
 
     def capture_start(self, start_file: Path) -> bool:
@@ -98,6 +126,9 @@ class PlanControls:
         Needs the serial port, which the live mirror is holding, so the
         mirror stands down for the read and comes straight back.
         """
+        if not self._calibration_synced("capture a start pose"):
+            return False
+
         import json
         import math
 
@@ -141,6 +172,8 @@ class PlanControls:
     # -- planning ------------------------------------------------------
 
     def plan(self, args: List[str], *, label: str) -> bool:
+        if not self._calibration_synced("plan"):
+            return False
         ok, why = available()
         if not ok:
             self.console.say(f"cannot plan: {why}")
@@ -182,6 +215,8 @@ class PlanControls:
         calibrated tick pipeline, which is what makes comparing them mean
         anything.
         """
+        if not self._calibration_synced("play"):
+            return
         if self.fk_update is None:
             self.console.say("no 3-D view attached to this panel")
             return
@@ -255,6 +290,8 @@ class PlanControls:
     # -- execution -----------------------------------------------------
 
     def execute(self, *, dry_run: bool, port: Optional[str], **kwargs: Any) -> None:
+        if not self._calibration_synced("execute"):
+            return
         if not (self.run_dir / "manifest.json").exists():
             self.console.say(f"no manifest at {self.run_dir} — plan one first")
             return
