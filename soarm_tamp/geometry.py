@@ -47,21 +47,33 @@ JAW_TABLE: dict[float, tuple[float, float]] = {
     30.0: (43.7, -19.8),
 }
 
-# Cube edge length for the first hardware test. Chosen against JAW_TABLE:
-# the jaws close on it at ~+5 deg, with the full range either side for
-# clearance on approach and squeeze on grip.
-CUBE_SIZE_M: float = 0.025
+# Cube edge length. 30 mm is the cube actually on the bench; the scene was
+# built around 25 mm until 2026-09-13. Against JAW_TABLE the jaws close on
+# 30 mm at ~+11.2 deg, with range either side for approach clearance and
+# squeeze on grip.
+CUBE_SIZE_M: float = 0.030
 
-# The jaw angle the *planner* freezes the gripper at. Held slightly wider
-# than the cube (29.1 mm vs 25 mm) so the modelled fingers clear it on
-# approach; the real open/close happens at execution time and is not part
-# of the plan. See GRIPPER_OPEN_DEG / GRIPPER_CLOSED_DEG below.
-PLANNING_JAW_DEG: float = 10.0
+# The jaw angle the *planner* freezes the gripper at. Held wider than the
+# cube (36.5 mm vs 30 mm) so the modelled fingers clear it on approach; the
+# real open/close happens at execution time and is not part of the plan.
+# See GRIPPER_OPEN_DEG / GRIPPER_CLOSED_DEG below.
+#
+# Must be a key of JAW_TABLE — GRASP_CENTERLINE_X_M indexes it directly.
+# At the old 10 deg the opening is 29.1 mm, which is NARROWER than a 30 mm
+# cube: every plan would have driven the fingers through it. 15 deg would
+# also clear, at 32.8 mm, but only by 1.4 mm a side.
+PLANNING_JAW_DEG: float = 20.0
 
 # Lowest point of the whole hand, measured along the approach axis at
-# PLANNING_JAW_DEG: the moving jaw's tip, 8.0 mm beyond the frame origin.
-# This is what actually decides how low the TCP may go.
-FINGERTIP_BELOW_TCP_M: float = 0.008
+# PLANNING_JAW_DEG: the moving jaw's tip, beyond the frame origin. This is
+# what actually decides how low the TCP may go.
+#
+# It is a function of the jaw angle, so it moves whenever PLANNING_JAW_DEG
+# does — the jaw tip swings up as the fingers open. Recomputed from the
+# URDF meshes in the gripper_frame_link frame; that computation reproduces
+# the previously recorded 8.0 mm at 10 deg exactly, which is why its 6.25 mm
+# at 20 deg is trusted here.
+FINGERTIP_BELOW_TCP_M: float = 0.00625
 
 # How much air to leave under that fingertip at the moment of grasp.
 FINGERTIP_TABLE_CLEARANCE_M: float = 0.005
@@ -87,8 +99,8 @@ FINGERTIP_TABLE_CLEARANCE_M: float = 0.005
 #    22 mm below it — here, 10 mm under the table. It failed exactly that
 #    way: solver residual 1e-10, result rejected for "Collision between
 #    so101/gripper_link_1 and table/base_link_0". Grasping near the tip is
-#    no compromise here — the fingers still contact ~20 mm of the cube's
-#    25 mm height.
+#    no compromise here — the fingers still contact most of the cube's
+#    30 mm height.
 GRASP_CENTERLINE_X_M: float = JAW_TABLE[PLANNING_JAW_DEG][1] / 1000.0
 GRASP_DEPTH_Z_M: float = (
     FINGERTIP_BELOW_TCP_M + FINGERTIP_TABLE_CLEARANCE_M - CUBE_SIZE_M / 2
@@ -97,13 +109,16 @@ GRASP_DEPTH_Z_M: float = (
 # --------------------------------------------------------------------------
 # Execution-time jaw commands (degrees on the `gripper` joint).
 #
-# CLOSED is deliberately *past* contact on a 25 mm cube (19.8 mm of
-# commanded gap vs a 25 mm cube): these are position-controlled serial
+# CLOSED is deliberately *past* contact on a 30 mm cube (25.2 mm of
+# commanded gap vs a 30 mm cube): these are position-controlled serial
 # servos, so grip force comes from commanding through the object and
-# letting the servo stall against its torque limit.
+# letting the servo stall against its torque limit. The 4.8 mm of
+# over-travel matches what 0 deg gave against the old 25 mm cube; closing
+# to 0 deg on a 30 mm cube would be 10.2 mm past contact, twice the squeeze
+# and twice the stall current.
 # --------------------------------------------------------------------------
-GRIPPER_OPEN_DEG: float = 20.0
-GRIPPER_CLOSED_DEG: float = 0.0
+GRIPPER_OPEN_DEG: float = 30.0
+GRIPPER_CLOSED_DEG: float = 5.0
 
 # --------------------------------------------------------------------------
 # Verified top-down workspace (TCP z in [0.015, 0.065] m, approach within
