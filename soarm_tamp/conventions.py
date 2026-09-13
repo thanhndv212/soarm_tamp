@@ -194,6 +194,62 @@ def safe_planning_bounds(cal: "RobotCalibration") -> list[tuple[float, float]]:
     return out
 
 
+#: How far a YAML bound may sit from the computed one before it is stale.
+#: The file carries 4 decimals, so anything past a rounding step is a real
+#: disagreement rather than a formatting artefact.
+BOUNDS_TOLERANCE_RAD = 2e-4
+
+
+def stale_bounds(
+    cal: "RobotCalibration", config_path: str | Path
+) -> list[str]:
+    """Joints where the planner's YAML bounds no longer match the arm.
+
+    :func:`safe_planning_bounds` is computed from the live calibration, but
+    the planner does not call it — it reads numbers baked into the task
+    YAML, inside a container, with no way to know they were generated
+    against a calibration that has since been re-zeroed four times. The
+    bounds then drift in whichever direction the zeros moved, silently, and
+    in the direction that matters: a bound that is now too *wide* lets the
+    planner commit to a joint angle the arm cannot reach, and the deviation
+    only appears at send time as clamping, which deforms the path rather
+    than following it.
+
+    So compare, and say which joints and which way. Returned as strings
+    rather than raised, so every stale joint is reported at once.
+    """
+    import re
+
+    text = Path(config_path).read_text()
+    want = dict(zip(JOINT_ORDER, safe_planning_bounds(cal)))
+    pat = re.compile(
+        r"joint: so101/(?P<name>\w+),\s*initial:\s*[-\d.]+,\s*"
+        r"bounds: \[\s*(?P<lo>[-\d.]+),\s*(?P<hi>[-\d.]+)\s*\]"
+    )
+    seen = set()
+    out: list[str] = []
+    for m in pat.finditer(text):
+        name = m.group("name")
+        seen.add(name)
+        if name not in want:
+            continue
+        lo, hi = float(m.group("lo")), float(m.group("hi"))
+        w_lo, w_hi = want[name]
+        notes = []
+        if abs(lo - w_lo) > BOUNDS_TOLERANCE_RAD:
+            way = "past what the arm can reach" if lo < w_lo else "short of the arm's reach"
+            notes.append(f"lower {lo:+.4f} vs {w_lo:+.4f} ({way})")
+        if abs(hi - w_hi) > BOUNDS_TOLERANCE_RAD:
+            way = "past what the arm can reach" if hi > w_hi else "short of the arm's reach"
+            notes.append(f"upper {hi:+.4f} vs {w_hi:+.4f} ({way})")
+        if notes:
+            out.append(f"{name}: " + "; ".join(notes))
+    missing = [n for n in JOINT_ORDER if n not in seen]
+    if missing:
+        out.append(f"not in the config at all: {', '.join(missing)}")
+    return out
+
+
 def format_bounds_yaml(bounds: Sequence[tuple[float, float]]) -> str:
     """Render bounds as the joint_groups block of the task config."""
     return "\n".join(

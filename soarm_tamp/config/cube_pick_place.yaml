@@ -57,10 +57,10 @@ environments: []
 joint_groups:
   SO101:
     - {joint: so101/shoulder_pan,   initial:  0.0,    bounds: [-1.9199, 1.9199]}
-    - {joint: so101/shoulder_lift,  initial:  0.0,    bounds: [-1.7448, 1.7448]}
-    - {joint: so101/elbow_flex,     initial:  0.0,    bounds: [-1.5692, 1.5692]}
+    - {joint: so101/shoulder_lift,  initial:  0.0,    bounds: [-1.7453, 1.6415]}
+    - {joint: so101/elbow_flex,     initial:  0.0,    bounds: [-1.5462, 1.6900]}
     - {joint: so101/wrist_flex,     initial:  0.0,    bounds: [-1.6581, 1.6581]}
-    - {joint: so101/wrist_roll,     initial:  0.0,    bounds: [-2.7439, 2.79]}
+    - {joint: so101/wrist_roll,     initial:  0.0,    bounds: [-2.7439, 2.8412]}
     - {joint: so101/gripper,        initial:  0.1745, bounds: [-0.1745, 1.7453]}
 
 # ---------------------------------------------------------------------------

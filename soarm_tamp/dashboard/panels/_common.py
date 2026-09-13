@@ -114,6 +114,34 @@ class PlanControls:
         self.console.say("  Save it in the Calibration tab, then try again")
         return False
 
+    def _bounds_current(self) -> bool:
+        """Warn when the planner's YAML bounds no longer match the arm.
+
+        A warning rather than a refusal: unlike an unsaved calibration,
+        stale bounds do not make the plan describe a different arm, they
+        make it reach for angles this one cannot hold. That is worth
+        stopping for when it is too wide and merely wasteful when it is too
+        narrow, and the message says which — but a run that is deliberately
+        conservative is still a run worth having.
+        """
+        try:
+            from ...conventions import calibration_path, stale_bounds
+            from soarm_sdk.calibration.frame import RobotCalibration
+
+            cfg = Path(__file__).resolve().parents[2] / "config" / "cube_pick_place.yaml"
+            if not cfg.exists():
+                return True
+            bad = stale_bounds(RobotCalibration.load(calibration_path()), cfg)
+        except Exception:
+            return True
+        if not bad:
+            return True
+        self.console.say("WARNING: planner bounds are stale vs. this calibration")
+        for line in bad:
+            self.console.say(f"  {line}")
+        self.console.say("  regenerate with conventions.format_bounds_yaml()")
+        return False
+
     # -- starting where the arm actually is -----------------------------
 
     def capture_start(self, start_file: Path) -> bool:
@@ -174,6 +202,7 @@ class PlanControls:
     def plan(self, args: List[str], *, label: str) -> bool:
         if not self._calibration_synced("plan"):
             return False
+        self._bounds_current()  # warns into the console; does not block
         ok, why = available()
         if not ok:
             self.console.say(f"cannot plan: {why}")
