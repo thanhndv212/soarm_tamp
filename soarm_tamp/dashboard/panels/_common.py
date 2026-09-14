@@ -106,12 +106,23 @@ class PlanControls:
             drift = self.ctx.calibration_drift()
         except Exception:
             return True  # an older context with no such notion; do not block
-        if not drift:
+        if drift:
+            detail = ", ".join(f"{n} {d:+.1f}°" for n, d in drift)
+            self.console.say(f"cannot {action}: the calibration has unsaved changes")
+            self.console.say(f"  the 3-D view is showing {detail} vs. the saved file")
+            self.console.say(
+                "  Save it in soarm-dashboard-calibration, then try again"
+            )
+            return False
+        from .watchdog import watchdog_violations
+
+        violations = watchdog_violations(self.ctx)
+        if not violations:
             return True
-        detail = ", ".join(f"{n} {d:+.1f}°" for n, d in drift)
-        self.console.say(f"cannot {action}: the calibration has unsaved changes")
-        self.console.say(f"  the 3-D view is showing {detail} vs. the saved file")
-        self.console.say("  Save it in the Calibration tab, then try again")
+        self.console.say(f"cannot {action}: TAMP calibration watchdog is blocking")
+        for violation in violations:
+            self.console.say(f"  {violation}")
+        self.console.say("  resolve it in soarm-dashboard-calibration")
         return False
 
     def _bounds_current(self) -> bool:

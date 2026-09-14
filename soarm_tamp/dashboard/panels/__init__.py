@@ -15,3 +15,6 @@ def build_pickplace_panel(*args, **kwargs):
     from .pickplace import build_pickplace_panel as _b
 
     return _b(*args, **kwargs)
+from .watchdog import build_watchdog_panel
+
+__all__ = ["build_watchdog_panel"]

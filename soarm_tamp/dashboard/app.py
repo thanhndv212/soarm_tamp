@@ -34,10 +34,11 @@ def build_app(
     use_stream: bool = True,
 ):
     from soarm_sdk.dashboard import DashboardApp
-    from soarm_sdk.dashboard.panels import calibration, monitor, setup
+    from soarm_sdk.dashboard.panels import setup
 
     from .panels.pickplace import build_pickplace_panel
     from .panels.tcp import build_tcp_panel
+    from .panels.watchdog import build_watchdog_panel
 
     app = DashboardApp(
         title="soarm_tamp — plan and run",
@@ -49,20 +50,13 @@ def build_app(
         use_stream=use_stream,
     )
 
-    # Connection, torque and the live mirror. Everything below depends on
-    # this tab having been used first, which is why it comes first.
-    for panel in setup.build_all(fk_update_fn=app.fk_update):
-        app.register(panel)
-
-    # Before the planning tabs, because they depend on it: every angle they
-    # plan, stream and render is a tick reading interpreted through the
-    # calibration, so a mirror that disagrees with the arm means the planner
-    # disagrees with it too. This tab is where that is checked and corrected.
-    app.register(calibration.build_calibration_panel())
+    # TAMP needs a connection and live mirror, not hardware setup or
+    # calibration controls. Those workflows live in soarm_sdk.
+    app.register(setup.build_startup_panel())
+    app.register(build_watchdog_panel())
 
     # The planning tabs drive the same 3-D view, so a replayed or executed
     # trajectory shows up in the same place the live arm does.
     app.register(build_tcp_panel(fk_update=app.fk_update))
     app.register(build_pickplace_panel(fk_update=app.fk_update))
-    app.register(monitor.build_monitor_panel())
     return app

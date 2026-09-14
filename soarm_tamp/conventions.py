@@ -89,6 +89,16 @@ def check_ready(cal: "RobotCalibration") -> list[str]:
             "limits, so the mapping cannot be trusted. Re-zero them against "
             "a pose you can verify (soarm_sdk.calibration.rezero_from_pose)."
         )
+    from soarm_sdk.calibration.pipeline import CalibrationPipeline
+
+    report = CalibrationPipeline(cal).report()
+    incomplete = [stage.stage.value.replace("_", " ") for stage in report.stages if not stage.passed]
+    if incomplete:
+        problems.append(
+            "calibration acceptance is incomplete: "
+            + ", ".join(incomplete)
+            + " — complete it in soarm-dashboard-calibration"
+        )
     return problems
 
 
@@ -184,14 +194,25 @@ def safe_planning_bounds(cal: "RobotCalibration") -> list[tuple[float, float]]:
     Unlike the earlier hand-derived version, this needs no conservative
     both-signs guess: the calibration states the sign, so the reachable
     interval is known rather than bracketed.
+
+    Once the travel has been *accepted* — repeated, non-simulated endpoint
+    measurements agreeing within the arm's tolerance — it replaces the URDF's
+    limits outright rather than being intersected with them. The URDF's
+    numbers are a model's opinion and are conservative here; the mechanism
+    stops where it stops, and planning against the narrower of the two throws
+    away reach the arm actually has. Until the travel is accepted the
+    intersection stands, because an unaccepted sweep can be the *encoder's*
+    range rather than the joint's — a wrapped ``wrist_roll`` measures a full
+    turn, and handing that to a planner as permission would be worse than
+    being conservative.
+
+    The policy itself lives in :mod:`soarm_sdk.calibration.limits` so this
+    and ``ServoRobot`` cannot drift apart about what a bound means.
     """
-    out: list[tuple[float, float]] = []
-    for j in cal.joints:
-        a, b = j.to_rad(j.tick_min), j.to_rad(j.tick_max)
-        reach_lo, reach_hi = min(a, b), max(a, b)
-        u_lo, u_hi = URDF_LIMITS[j.name]
-        out.append((max(u_lo, reach_lo), min(u_hi, reach_hi)))
-    return out
+    from soarm_sdk.calibration.limits import effective_limits
+
+    declared = [URDF_LIMITS[j.name] for j in cal.joints]
+    return effective_limits(cal, declared)
 
 
 #: How far a YAML bound may sit from the computed one before it is stale.
