@@ -73,6 +73,29 @@ def _build_tcp(server: Any, ctx: Any, fk_update, fk_update_ghost=None) -> None:
 
     with server.gui.add_folder("Run"):
         dry_h = server.gui.add_checkbox("Dry run (no hardware)", initial_value=True)
+        force_h = server.gui.add_checkbox(
+            "Force (skip calibration checks)", initial_value=False
+        )
+        server.gui.add_markdown(
+            "⚠️ *Force* skips `check_ready()` — the same override "
+            "`execute.run(..., force=True)` documents as \"at your own "
+            "risk\". Use only for a specific, understood gap (e.g. one "
+            "joint's zero not yet pose-verified); it does not fix the "
+            "calibration, it just stops the refusal."
+        )
+        speed_scale_h = server.gui.add_slider(
+            "Speed scale (feedforward)", min=0.0, max=2.0, step=0.1,
+            initial_value=1.5,
+        )
+        server.gui.add_markdown(
+            "Multiplies the plan's own per-step velocity when commanding "
+            "each servo. 1.5 (the `execute.py` default) asks every joint "
+            "to run 50% ahead of the plan's own pace; on a fast segment "
+            "that can ask more than a joint's real margin allows — seen on "
+            "this arm as `wrist_flex` falling behind and the run aborting "
+            "(`ABORTING: ... off the planned path`). Try 1.0 first (the "
+            "plan's own pace, no overdrive) if that happens."
+        )
         exec_btn = server.gui.add_button("Execute", color="orange")
 
     with server.gui.add_folder("Full scene viewer (separate port)"):
@@ -143,10 +166,16 @@ def _build_tcp(server: Any, ctx: Any, fk_update, fk_update_ghost=None) -> None:
 
     @exec_btn.on_click
     def _exec(_: Any) -> None:
+        if force_h.value:
+            console.say(
+                "⚠️ FORCED — calibration acceptance checks are being skipped "
+                "for this run"
+            )
         ctrl.execute(
             dry_run=bool(dry_h.value),
             port=ctx.device_h.value or None,
             rate_hz=30.0,
             max_step=0.02,
-            force=False,
+            force=bool(force_h.value),
+            speed_scale=float(speed_scale_h.value),
         )

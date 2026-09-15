@@ -26,6 +26,23 @@ def test_watchdog_blocks_calibration_without_explicit_tolerances():
     assert violations == ["calibration has no explicit acceptance tolerances"]
 
 
+def test_the_execute_panels_expose_a_force_toggle_not_a_hardcoded_bypass():
+    """execute.run(force=True) is documented as an explicit "at your own
+    risk" override; nothing in the dashboard used to expose it, so a
+    calibration gap that needed --force could only be worked around from a
+    terminal outside the dashboard's own execution job (losing its trace
+    and live-mirror handling)."""
+    import inspect
+
+    from soarm_tamp.dashboard.panels import pickplace, tcp
+
+    for mod, fn in ((tcp, "_build_tcp"), (pickplace, "_build_pickplace")):
+        src = inspect.getsource(getattr(mod, fn))
+        assert "force_h" in src, fn
+        assert "force=False," not in src, fn
+        assert "force=bool(force_h.value)" in src, fn
+
+
 def test_play_drives_the_ghost_not_the_live_mirror():
     """Was: ManifestPlayer and the live-poll loop both drove fk_update, so
     a preview fought the real arm's position for the same mesh."""
