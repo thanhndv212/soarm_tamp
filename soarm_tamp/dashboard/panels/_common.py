@@ -75,16 +75,19 @@ class PlanControls:
         *,
         run_dir: Path,
         fk_update: Optional[Callable] = None,
+        fk_update_ghost: Optional[Callable] = None,
     ) -> None:
         self.server = server
         self.ctx = ctx
         self.console = console
         self.run_dir = Path(run_dir)
         self.fk_update = fk_update
+        self.fk_update_ghost = fk_update_ghost
         self.plan_job: Optional[ContainerJob] = None
         self.replay_job: Optional[ContainerJob] = None
         self.exec_job: Optional[ExecutionJob] = None
         self.player: Optional[ManifestPlayer] = None
+        self._trail_handle: Optional[Any] = None
 
     # -- the mirror and the file must agree -----------------------------
 
@@ -299,15 +302,55 @@ class PlanControls:
             return False
         self.console.clear()
         self.console.say(f"{label} ...")
+        def _on_plan_done(rc: int) -> None:
+            self.console.say(
+                "PLANNING SUCCEEDED" if rc == 0 else f"planning failed (rc={rc})"
+            )
+            if rc == 0:
+                self._draw_trail()
+
         self.plan_job = ContainerJob(
             args,
             on_line=self._plan_line,
-            on_done=lambda rc: self.console.say(
-                "PLANNING SUCCEEDED" if rc == 0 else f"planning failed (rc={rc})"
-            ),
+            on_done=_on_plan_done,
         )
         self.plan_job.start()
         return True
+
+    def _draw_trail(self) -> None:
+        """Trace the gripper's path through every waypoint of this manifest.
+
+        Drawn once, right when planning succeeds, and left on screen — a
+        static reference for "where was this supposed to go", independent
+        of whatever the ghost or the live mirror are doing right now.
+        Re-adding the same scene name replaces the previous trail, so an
+        old plan's trace never lingers next to a new one.
+        """
+        urdf = getattr(self.ctx, "urdf", None)
+        if urdf is None:
+            return
+        try:
+            import numpy as np
+
+            from ..conventions import JOINT_ORDER
+
+            segments = load_segments(self.run_dir)
+            points = []
+            for seg in segments:
+                for q in seg["waypoints"]:
+                    urdf.update_cfg(dict(zip(JOINT_ORDER, q)))
+                    T, _ = urdf.scene.graph["gripper_frame_link"]
+                    points.append(T[:3, 3])
+            if len(points) < 2:
+                return
+            self._trail_handle = self.server.scene.add_spline_catmull_rom(
+                "/planned_path",
+                points=np.asarray(points),
+                color=(255, 140, 0),
+                line_width=3.0,
+            )
+        except Exception:
+            pass  # the trail is a convenience; a plan must not fail over it
 
     def _plan_line(self, line: str) -> None:
         # The planner is chatty at INFO; surface the parts a person watching
@@ -342,9 +385,14 @@ class PlanControls:
         if self.player is not None and self.player.running:
             self.console.say("already playing (stop it first)")
             return
+        # The ghost, not the live mirror — see fk_update_ghost's own
+        # docstring. Before this, playback and the live-poll loop both drove
+        # the same mesh through the same callback, so previewing a plan
+        # fought the real arm's own position for the same pixels.
+        target = self.fk_update_ghost or self.fk_update
         self.player = ManifestPlayer(
             self.run_dir,
-            self.fk_update,
+            target,
             joint_ids=list(self.ctx.joint_ids),
             speed=speed,
             loop=loop,

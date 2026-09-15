@@ -57,6 +57,12 @@ def build_app(
 
     # The planning tabs drive the same 3-D view, so a replayed or executed
     # trajectory shows up in the same place the live arm does.
-    app.register(build_tcp_panel(fk_update=app.fk_update))
-    app.register(build_pickplace_panel(fk_update=app.fk_update))
+    app.register(
+        build_tcp_panel(fk_update=app.fk_update, fk_update_ghost=app.fk_update_ghost)
+    )
+    app.register(
+        build_pickplace_panel(
+            fk_update=app.fk_update, fk_update_ghost=app.fk_update_ghost
+        )
+    )
     return app

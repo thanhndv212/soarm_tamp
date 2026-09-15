@@ -33,14 +33,14 @@ Z_MIN_M, Z_MAX_M = 0.015, 0.065
 SAFE_RADIUS_MIN_M = 0.14
 
 
-def build_tcp_panel(fk_update=None) -> Panel:
+def build_tcp_panel(fk_update=None, fk_update_ghost=None) -> Panel:
     def _build(server: Any, ctx: Any) -> None:
-        _build_tcp(server, ctx, fk_update)
+        _build_tcp(server, ctx, fk_update, fk_update_ghost)
 
     return Panel("TCP Plan", _build)
 
 
-def _build_tcp(server: Any, ctx: Any, fk_update) -> None:
+def _build_tcp(server: Any, ctx: Any, fk_update, fk_update_ghost=None) -> None:
     server.gui.add_markdown(
         "## TCP pose\n"
         "One Cartesian goal, planned in the container and streamed here. "
@@ -88,7 +88,8 @@ def _build_tcp(server: Any, ctx: Any, fk_update) -> None:
     console.clear()
     root = Path(__file__).resolve().parents[3]
     ctrl = PlanControls(
-        server, ctx, console, run_dir=root / RUN_DIR, fk_update=fk_update
+        server, ctx, console, run_dir=root / RUN_DIR, fk_update=fk_update,
+        fk_update_ghost=fk_update_ghost,
     )
 
     @capture_btn.on_click

@@ -21,14 +21,14 @@ RUN_DIR = "runs/dash_cube"
 START_FILE = "runs/dash_start.json"
 
 
-def build_pickplace_panel(fk_update=None) -> Panel:
+def build_pickplace_panel(fk_update=None, fk_update_ghost=None) -> Panel:
     def _build(server: Any, ctx: Any) -> None:
-        _build_pickplace(server, ctx, fk_update)
+        _build_pickplace(server, ctx, fk_update, fk_update_ghost)
 
     return Panel("Pick & Place", _build)
 
 
-def _build_pickplace(server: Any, ctx: Any, fk_update) -> None:
+def _build_pickplace(server: Any, ctx: Any, fk_update, fk_update_ghost=None) -> None:
     root = Path(__file__).resolve().parents[3]
 
     server.gui.add_markdown(
@@ -72,7 +72,8 @@ def _build_pickplace(server: Any, ctx: Any, fk_update) -> None:
     console = Console(log_md)
     console.clear()
     ctrl = PlanControls(
-        server, ctx, console, run_dir=root / RUN_DIR, fk_update=fk_update
+        server, ctx, console, run_dir=root / RUN_DIR, fk_update=fk_update,
+        fk_update_ghost=fk_update_ghost,
     )
 
     @capture_btn.on_click
