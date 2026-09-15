@@ -81,6 +81,27 @@ N_ARM_JOINTS = 6
 TRACE_NAME = "live.jsonl"
 
 
+class _Adrift(RuntimeError):
+    """Raised when a joint falls badly behind the planned path mid-run.
+
+    ``worst_lag > 3 * sync_tol`` was already computed at the end of a run,
+    purely to print "ARM OFF THE PLANNED PATH" after the fact — the loop
+    itself just kept streaming waypoints regardless of how far behind a
+    stalled joint fell, only reporting the *first* stall
+    ("arm is not keeping up") and silently counting the rest. A joint that
+    cannot reach one waypoint within ``sync_timeout`` will not reach the
+    next one either, so each further waypoint adds another whole step's
+    worth of unreachable distance on top of a gap that was never going to
+    close — measured on hardware, that grows past a quarter radian within
+    a couple dozen waypoints while ``step clamp`` warnings fire on every
+    one of them. Past 3x tolerance the same threshold that used to only
+    change what got printed now stops the run instead: the arm cannot
+    reach where the stream already is, and adding still more distance on
+    top is not recoverable, only worse — and per the module's own
+    docstring, wherever it ends up from here was never collision-checked.
+    """
+
+
 class _Trace:
     """Append each command to ``<run>/live.jsonl`` as it is issued.
 
@@ -605,6 +626,16 @@ def run(
                                     f"behind after {sync_timeout:.1f}s",
                                     flush=True,
                                 )
+                            if lag > 3 * sync_tol:
+                                worst_idx = int(np.argmax(np.abs(
+                                    np.asarray(robot.get_joint_positions()) - target
+                                )))
+                                raise _Adrift(
+                                    f"{robot.joint_names[worst_idx]} is {lag:.3f} rad "
+                                    f"off the planned path (> {3 * sync_tol:.3f} rad) "
+                                    f"after {sync_timeout:.1f}s at waypoint {n_sent} "
+                                    f"of segment {seg['index']} ({seg['edge']})"
+                                )
                 # q_urdf is the plan's raw row — for the gripper axis, the
                 # frozen placeholder, never what target actually asked for
                 # once current_gripper_rad has overridden it. Trace what was
@@ -669,6 +700,17 @@ def run(
                               f"(target {settle_tol:.3f})", flush=True)
                 elif pace:
                     time.sleep(0.6)
+    except _Adrift as exc:
+        print(f"\nABORTING: {exc}", file=sys.stderr)
+        print(
+            "  the arm cannot reach where the plan already is; streaming "
+            "more waypoints on top of an unclosing gap only adds distance "
+            "that was never collision-checked. Investigate --speed-scale, "
+            "--rate, or whether this pose needs more torque than the servo "
+            "has (load).",
+            file=sys.stderr,
+        )
+        return 3
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
         return 130
