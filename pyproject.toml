@@ -23,5 +23,12 @@ dependencies = []
 [project.optional-dependencies]
 host = ["soarm_sdk>=0.4.0"]
 
+# Only usable with the `host` extra installed (needs soarm_sdk's viser
+# dashboard shell) — same as `python -m soarm_tamp.dashboard`, which this
+# wraps. Declared unconditionally is fine: an entry point costs nothing
+# unless invoked, same as soarm_sdk's own soarm-dashboard* scripts.
+[project.scripts]
+soarm-tamp-dashboard = "soarm_tamp.dashboard.__main__:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["soarm_tamp"]
