@@ -522,6 +522,17 @@ def run(
     stalled = 0
     settled: list = []
     worst_lag = 0.0
+    # The plan freezes the jaw at whatever it measured at the captured start
+    # pose, in EVERY waypoint of EVERY segment — grasp is a rigid constraint
+    # to HPP, never something it plans a gripper trajectory for. That value
+    # is only ever right at t=0. Once a jaw action fires below, this is what
+    # actually tracks the intended gripper angle; every per-waypoint target
+    # asks for THIS, not whatever the plan still says. Without it, the very
+    # first waypoint of the segment after a close re-commands the plan's
+    # frozen open value and undoes the close before the arm has moved at
+    # all — measured live: closed at segment 1, reopened one command later
+    # at the start of segment 2, the jaw never actually holding anything.
+    current_gripper_rad = float(segments[0]["q"][0][5]) if segments else 0.0
     trace = _Trace(run_dir, trace_enabled)
     trace.write(
         event="start", segments=len(segments), rate_hz=rate_hz, dry_run=dry_run
@@ -554,6 +565,10 @@ def run(
                 n_sent += 1
                 if robot is not None:
                     target = np.asarray(q_urdf, dtype=float)
+                    # Override the plan's frozen placeholder with whatever
+                    # the jaw is actually meant to be doing right now — see
+                    # current_gripper_rad's own comment above.
+                    target[5] = current_gripper_rad
                     # Velocity feedforward: the plan's own speed for this
                     # step, so each servo runs at the trajectory's pace
                     # rather than the SDK default and consecutive commands
@@ -564,6 +579,11 @@ def run(
                     dq = None
                     if speed_scale > 0 and wp_i > 0:
                         prev = np.asarray(qs[wp_i - 1], dtype=float)
+                        # prev still carries the plan's frozen gripper value;
+                        # matching target's override here keeps the gripper
+                        # axis out of this step's delta, which is about the
+                        # arm's own pace and has nothing to do with the jaw.
+                        prev[5] = current_gripper_rad
                         # rad per second for THIS step: the plan's own dwell
                         # when replaying its timing, else the command period.
                         span = schedule[wp_i] if use_timing else period
@@ -585,8 +605,14 @@ def run(
                                     f"behind after {sync_timeout:.1f}s",
                                     flush=True,
                                 )
+                # q_urdf is the plan's raw row — for the gripper axis, the
+                # frozen placeholder, never what target actually asked for
+                # once current_gripper_rad has overridden it. Trace what was
+                # actually commanded (dry runs never command anything, so
+                # q_urdf is still the right thing to show there).
+                traced_q = target if robot is not None else np.asarray(q_urdf)
                 trace.write(
-                    i=n_sent, seg=seg["index"], q=[round(v, 6) for v in q_urdf]
+                    i=n_sent, seg=seg["index"], q=[round(float(v), 6) for v in traced_q]
                 )
                 # Pace against one wall-clock deadline for the segment: the
                 # plan's own dwell for this step when it is time-
@@ -605,9 +631,11 @@ def run(
                     if remaining > 0:
                         time.sleep(remaining)
             if robot is not None and settle_tol > 0:
+                settle_target = np.asarray(qs[-1], dtype=float)
+                settle_target[5] = current_gripper_rad
                 final_err = _settle(
                     robot,
-                    np.asarray(qs[-1], dtype=float),
+                    settle_target,
                     settle_tol,
                     settle_timeout,
                 )
@@ -619,11 +647,26 @@ def run(
                 deg = GRIPPER_CLOSED_DEG if action == "close" else GRIPPER_OPEN_DEG
                 print(f"        jaw -> {action.upper()} ({deg:+.0f} deg)", flush=True)
                 trace.write(seg=seg["index"], jaw=action, deg=deg)
+                # Every waypoint from here on asks for this instead of the
+                # plan's frozen value — otherwise the very first command of
+                # the next segment reopens what this just closed.
+                current_gripper_rad = math.radians(deg)
                 if robot is not None:
                     q = list(robot.get_joint_positions())
-                    q[5] = math.radians(deg)
-                    robot.set_joint_positions(np.asarray(q, dtype=float))
-                    time.sleep(0.6)
+                    q[5] = current_gripper_rad
+                    jaw_target = np.asarray(q, dtype=float)
+                    robot.set_joint_positions(jaw_target)
+                    # A flat sleep(0.6) here (no dq, so the SDK's default
+                    # ~0.46 rad/s) leaves a real 45-degree swing short of
+                    # arrival whenever it needs more than 0.6s — measured:
+                    # the residual carried into the next segment's own sync
+                    # check as "the gripper is off path", not because
+                    # anything moved wrong, only because this never
+                    # confirmed the jaw had actually gotten there yet.
+                    jaw_err = _settle(robot, jaw_target, settle_tol, settle_timeout)
+                    if jaw_err > settle_tol:
+                        print(f"        jaw settled to {jaw_err:.4f} rad "
+                              f"(target {settle_tol:.3f})", flush=True)
                 elif pace:
                     time.sleep(0.6)
     except KeyboardInterrupt:
