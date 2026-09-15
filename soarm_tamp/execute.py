@@ -65,7 +65,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import queue
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -87,33 +89,62 @@ class _Trace:
     and a half-written line is simply the last one, which the reader
     retries rather than parses.
 
+    The write happens on its own thread, off the control loop that calls
+    :meth:`write`. This is pure visualization plumbing for a follower on
+    the other side of a bind mount, and a bind mount is exactly the kind
+    of filesystem that occasionally stalls a write for tens of
+    milliseconds (virtiofs/osxfs sync) — long enough, sitting inside the
+    per-command loop, to visibly perturb the servo's pacing. ``write()``
+    only enqueues, in memory, and returns; the arm's timing can no longer
+    depend on how fast the mirror's disk happens to be right now.
+
     Never allowed to break a run: if the file cannot be opened or a write
     fails, the trace turns itself off and the servos carry on. Losing the
     picture is not a reason to stop the arm mid-trajectory.
     """
 
     def __init__(self, run_dir: Path, enabled: bool) -> None:
-        self.fh = None
+        self.enabled = enabled
+        self._thread: "threading.Thread | None" = None
+        self._q: "queue.SimpleQueue" = queue.SimpleQueue()
         if not enabled:
             return
+        self._path = run_dir / TRACE_NAME
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
         try:
-            self.fh = (run_dir / TRACE_NAME).open("w", buffering=1)
+            fh = self._path.open("w", buffering=1)
         except OSError as exc:
             print(f"  trace       : disabled ({exc})")
-
-    def write(self, **fields) -> None:
-        if self.fh is None:
+            self.enabled = False
             return
         try:
-            self.fh.write(json.dumps(fields) + "\n")
-        except OSError as exc:
-            print(f"  trace       : stopped ({exc})")
-            self.fh = None
+            while True:
+                item = self._q.get()
+                if item is None:
+                    break
+                try:
+                    fh.write(json.dumps(item) + "\n")
+                except OSError as exc:
+                    print(f"  trace       : stopped ({exc})")
+                    self.enabled = False
+                    break
+        finally:
+            fh.close()
+
+    def write(self, **fields) -> None:
+        if not self.enabled or self._thread is None:
+            return
+        self._q.put(fields)
 
     def close(self) -> None:
-        if self.fh is not None:
-            self.fh.close()
-            self.fh = None
+        if self._thread is None:
+            return
+        self._q.put(None)
+        self._thread.join(timeout=2.0)
+        self._thread = None
 
 
 def _load_segments(run_dir: Path) -> list[dict]:
