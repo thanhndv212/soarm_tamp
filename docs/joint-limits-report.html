@@ -1,0 +1,489 @@
+<title>Joint Limit Architecture</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --bg:#f3f5f8;
+    --surface:#ffffff;
+    --surface-2:#eceff3;
+    --ink:#161c26;
+    --muted:#5b6472;
+    --faint:#8891a0;
+    --hairline:#dde2e9;
+    --accent:#b5650e;       /* hard-limit / firmware amber */
+    --accent-ink:#7a4408;
+    --accent-soft:#f6e9d8;
+    --verified:#1c7a68;     /* measured / verified teal */
+    --verified-soft:#dcefe9;
+    --critical:#b23b3b;
+    --critical-soft:#f7e2e0;
+    --warn:#a3760f;
+    --warn-soft:#f4ecd8;
+    --code-bg:#eef1f5;
+    --shadow: 0 1px 2px rgba(20,26,37,.06), 0 8px 24px -12px rgba(20,26,37,.18);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0f1319;
+      --surface:#161c25;
+      --surface-2:#1c2330;
+      --ink:#e7ebf1;
+      --muted:#9aa4b3;
+      --faint:#6b7484;
+      --hairline:#2a3241;
+      --accent:#e0913f;
+      --accent-ink:#f6d3a3;
+      --accent-soft:#3a2a15;
+      --verified:#4fc0a6;
+      --verified-soft:#152c27;
+      --critical:#e2726a;
+      --critical-soft:#3a1c1a;
+      --warn:#dcb35a;
+      --warn-soft:#332a14;
+      --code-bg:#1a212c;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px -14px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f1319;
+    --surface:#161c25;
+    --surface-2:#1c2330;
+    --ink:#e7ebf1;
+    --muted:#9aa4b3;
+    --faint:#6b7484;
+    --hairline:#2a3241;
+    --accent:#e0913f;
+    --accent-ink:#f6d3a3;
+    --accent-soft:#3a2a15;
+    --verified:#4fc0a6;
+    --verified-soft:#152c27;
+    --critical:#e2726a;
+    --critical-soft:#3a1c1a;
+    --warn:#dcb35a;
+    --warn-soft:#332a14;
+    --code-bg:#1a212c;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 28px -14px rgba(0,0,0,.6);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"IBM Plex Sans", system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding-block: 40px 96px;
+  }
+  .wrap{ max-width: 900px; margin: 0 auto; padding: 0 20px; }
+  code, .mono, .tabular{ font-family:"IBM Plex Mono", ui-monospace, monospace; }
+  .tabular{ font-variant-numeric: tabular-nums; }
+
+  /* ---------- header / datasheet block ---------- */
+  .sheet-head{
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 28px 30px 24px;
+    display:flex; flex-direction:column; gap:18px;
+  }
+  .eyebrow{
+    font-family:"IBM Plex Mono", monospace; font-size:12.5px; letter-spacing:.11em;
+    text-transform:uppercase; color:var(--accent-ink); font-weight:600;
+  }
+  h1{
+    font-size: clamp(28px, 4.4vw, 38px); line-height:1.12; margin:2px 0 0;
+    letter-spacing:-.01em; text-wrap:balance; font-weight:700;
+  }
+  .dek{ color:var(--muted); font-size:16.5px; line-height:1.55; max-width:62ch; margin:2px 0 0;}
+  .meta-row{
+    display:flex; flex-wrap:wrap; gap:10px 28px;
+    border-top:1px solid var(--hairline); padding-top:16px; margin-top:2px;
+  }
+  .meta-item{ display:flex; flex-direction:column; gap:3px; min-width:120px;}
+  .meta-item .k{ font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); font-weight:600;}
+  .meta-item .v{ font-family:"IBM Plex Mono",monospace; font-size:14px; font-weight:500;}
+  .badge{
+    display:inline-flex; align-items:center; gap:6px;
+    font-family:"IBM Plex Mono", monospace; font-size:12px; font-weight:600;
+    padding:3px 9px; border-radius:99px; width:fit-content;
+  }
+  .badge.critical{ background:var(--critical-soft); color:var(--critical); }
+  .badge.warn{ background:var(--warn-soft); color:var(--warn); }
+  .badge.ok{ background:var(--verified-soft); color:var(--verified); }
+  .badge .dot{ width:6px; height:6px; border-radius:50%; background:currentColor; }
+
+  /* ---------- section rhythm ---------- */
+  section{ margin-top:52px; }
+  .sec-head{ display:flex; align-items:baseline; gap:12px; margin-bottom:6px; }
+  .sec-num{
+    font-family:"IBM Plex Mono",monospace; font-size:14px; color:var(--faint);
+    font-weight:600; letter-spacing:.02em;
+  }
+  h2{ font-size:23px; margin:0; letter-spacing:-.005em; text-wrap:balance; }
+  .sec-intro{ color:var(--muted); font-size:15.5px; line-height:1.65; max-width:66ch; margin:10px 0 22px;}
+  h3{ font-size:16.5px; margin:28px 0 10px; }
+  p{ line-height:1.68; font-size:15.5px; max-width:68ch; }
+  p.tight{ max-width:none; }
+  a{ color:var(--verified); }
+
+  /* ---------- layer stack diagram ---------- */
+  .stack{
+    display:flex; flex-direction:column; gap:0;
+    border:1px solid var(--hairline); border-radius:12px; overflow:hidden;
+    background:var(--surface); box-shadow:var(--shadow);
+  }
+  .layer{
+    display:grid; grid-template-columns: 34px 1fr; gap:14px;
+    padding:13px 18px; border-top:1px solid var(--hairline); position:relative;
+  }
+  .layer:first-child{ border-top:none; }
+  .layer .num{
+    font-family:"IBM Plex Mono",monospace; font-size:13px; font-weight:700;
+    color:var(--faint); padding-top:2px;
+  }
+  .layer .body{ display:flex; flex-direction:column; gap:2px; }
+  .layer .name{ font-weight:600; font-size:14.5px; }
+  .layer .loc{ font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--muted); }
+  .layer.hw{ background:var(--accent-soft); }
+  .layer.hw .name{ color:var(--accent-ink); }
+  .layer.model{ background:var(--surface-2); }
+  .authority{
+    display:flex; align-items:center; gap:10px; padding:10px 18px;
+    background:var(--surface-2); border-top:1px solid var(--hairline);
+    font-family:"IBM Plex Mono",monospace; font-size:11.5px; color:var(--faint);
+    letter-spacing:.04em; text-transform:uppercase;
+  }
+  .authority svg{ flex:none; }
+
+  /* ---------- tables ---------- */
+  .tbl-scroll{ overflow-x:auto; border:1px solid var(--hairline); border-radius:10px; background:var(--surface); box-shadow:var(--shadow);}
+  table{ border-collapse:collapse; width:100%; min-width:560px; font-size:14px; }
+  th{
+    text-align:left; font-size:11px; letter-spacing:.07em; text-transform:uppercase;
+    color:var(--faint); font-weight:600; padding:11px 14px; border-bottom:1px solid var(--hairline);
+    background:var(--surface-2); white-space:nowrap;
+  }
+  td{ padding:11px 14px; border-bottom:1px solid var(--hairline); vertical-align:top; }
+  tr:last-child td{ border-bottom:none; }
+  td.num, th.num{ font-family:"IBM Plex Mono",monospace; text-align:right; font-variant-numeric:tabular-nums; }
+  td .flag{ font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600; }
+  .flag.bad{ color:var(--critical); }
+  .flag.good{ color:var(--verified); }
+
+  /* ---------- callout cards ---------- */
+  .callout{
+    border-radius:10px; padding:18px 20px; margin:18px 0; border:1px solid var(--hairline);
+    background:var(--surface); box-shadow:var(--shadow);
+  }
+  .callout.critical{ border-color: color-mix(in srgb, var(--critical) 35%, var(--hairline)); background:var(--critical-soft); }
+  .callout.warn{ border-color: color-mix(in srgb, var(--warn) 35%, var(--hairline)); background:var(--warn-soft); }
+  .callout .cal-head{ display:flex; align-items:center; gap:9px; margin-bottom:8px; }
+  .callout .cal-title{ font-weight:700; font-size:14.5px; }
+  .callout p{ margin:6px 0 0; max-width:none; font-size:14.5px; }
+  .readout{
+    display:flex; gap:22px; flex-wrap:wrap; margin-top:12px;
+    font-family:"IBM Plex Mono",monospace; font-size:13px;
+  }
+  .readout .r{ display:flex; flex-direction:column; gap:2px; }
+  .readout .r .k{ color:var(--faint); font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+  .readout .r .v{ font-weight:600; }
+
+  pre{
+    background:var(--code-bg); border:1px solid var(--hairline); border-radius:9px;
+    padding:14px 16px; overflow-x:auto; font-size:12.8px; line-height:1.6;
+    font-family:"IBM Plex Mono",monospace; color:var(--ink);
+  }
+
+  /* ---------- vendor pattern cards ---------- */
+  .patterns{ display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin:18px 0; }
+  .pattern{
+    border:1px solid var(--hairline); border-radius:10px; background:var(--surface);
+    padding:16px 18px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:8px;
+  }
+  .pattern .vendor{
+    font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--verified); font-weight:700;
+  }
+  .pattern p{ margin:0; font-size:13.8px; max-width:none; color:var(--muted); line-height:1.55;}
+  .pattern .lesson{ font-size:13.2px; color:var(--ink); border-top:1px dashed var(--hairline); padding-top:8px; margin-top:2px;}
+  .pattern .lesson b{ color: var(--accent-ink); }
+  @media (max-width:640px){ .patterns{ grid-template-columns:1fr; } }
+
+  ol.reco{ padding-left:0; list-style:none; display:flex; flex-direction:column; gap:14px; margin:18px 0; }
+  ol.reco li{
+    display:grid; grid-template-columns:30px 1fr; gap:12px;
+    background:var(--surface); border:1px solid var(--hairline); border-radius:10px;
+    padding:14px 16px; box-shadow:var(--shadow); font-size:14.5px; line-height:1.55;
+  }
+  ol.reco li .n{ font-family:"IBM Plex Mono",monospace; font-weight:700; color:var(--accent-ink); }
+  ol.reco li b{ display:block; margin-bottom:2px; }
+
+  footer{
+    margin-top:60px; padding-top:20px; border-top:1px solid var(--hairline);
+    color:var(--faint); font-size:12.5px; font-family:"IBM Plex Mono",monospace; line-height:1.7;
+  }
+
+  @media (max-width:560px){
+    .meta-row{ gap:10px 20px; }
+    table{ min-width:480px; }
+  }
+</style>
+
+<div class="wrap">
+
+  <div class="sheet-head">
+    <div class="eyebrow">Hardware debug report · joint limits</div>
+    <h1>Seven layers deep, and the servo doesn't read any of them</h1>
+    <p class="dek">A TCP plan asked <code>wrist_flex</code> to move 0.41&nbsp;rad past a
+      number nobody had told the software about. The arm didn't error — it
+      just stopped moving that one joint and kept going on the other five.
+      This is the full map of where a joint limit is defined in this stack,
+      what's still wrong, and how the standard robotics frameworks solve the
+      same layering problem.</p>
+    <div class="meta-row">
+      <div class="meta-item"><span class="k">Arm</span><span class="v">thanh_arm · SO-101</span></div>
+      <div class="meta-item"><span class="k">Servos</span><span class="v">6× STS3215</span></div>
+      <div class="meta-item"><span class="k">Date</span><span class="v">2026-09-14</span></div>
+      <div class="meta-item"><span class="k">Layers mapped</span><span class="v">8</span></div>
+      <div class="meta-item">
+        <span class="k">Status</span>
+        <span style="display:flex; gap:6px; flex-wrap:wrap;">
+          <span class="badge critical"><span class="dot"></span>1 confirmed bug</span>
+          <span class="badge warn"><span class="dot"></span>1 latent</span>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">01</span><h2>The layer map</h2></div>
+    <p class="sec-intro">Seven places declare or derive a joint limit for this arm, plus one
+      register that isn't a limit but behaves like one when ignored. Physically only
+      the bottom layer is real — every layer above it is somebody's <em>belief</em>
+      about the bottom layer, and this session found several of those beliefs stale.</p>
+
+    <div class="stack">
+      <div class="layer hw">
+        <div class="num">0</div>
+        <div class="body"><div class="name">Mechanism — the physical hard stop</div>
+          <div class="loc">the arm itself</div></div>
+      </div>
+      <div class="layer hw">
+        <div class="num">1</div>
+        <div class="body"><div class="name">Servo EEPROM · MIN/MAX_ANGLE_LIMIT (reg 9, 11)</div>
+          <div class="loc">firmware, written at bench setup — outside this repo</div></div>
+      </div>
+      <div class="layer">
+        <div class="num">2</div>
+        <div class="body"><div class="name">ServoHardwareInterface._apply_safety()</div>
+          <div class="loc">soarm_sdk/robot/hardware.py</div></div>
+      </div>
+      <div class="layer">
+        <div class="num">3</div>
+        <div class="body"><div class="name">effective_limits() policy</div>
+          <div class="loc">soarm_sdk/calibration/limits.py</div></div>
+      </div>
+      <div class="layer">
+        <div class="num">4</div>
+        <div class="body"><div class="name">Calibration · tick_min/max, zero_offset, direction_sign</div>
+          <div class="loc">~/.soarm_sdk/calibration.json</div></div>
+      </div>
+      <div class="layer model">
+        <div class="num">5</div>
+        <div class="body"><div class="name">safe_planning_bounds()</div>
+          <div class="loc">soarm_tamp/conventions.py</div></div>
+      </div>
+      <div class="layer model">
+        <div class="num">6</div>
+        <div class="body"><div class="name">Planner YAML · joint_groups</div>
+          <div class="loc">soarm_tamp/config/cube_pick_place.yaml</div></div>
+      </div>
+      <div class="layer model">
+        <div class="num">7</div>
+        <div class="body"><div class="name">URDF &lt;limit&gt;</div>
+          <div class="loc">so101_new_calib.urdf (duplicated in so101.yaml, conventions.py)</div></div>
+      </div>
+      <div class="authority">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Priority runs bottom-up — layer 1 always wins, whether or not any layer above agrees
+      </div>
+    </div>
+
+    <h3>How a value reaches the servo</h3>
+    <pre>URDF &lt;limit&gt;   ──┐
+                  ├─▶ safe_planning_bounds() ─▶ planner YAML ─▶ HPP plans
+Calibration    ───┤     (soarm_tamp)             (config/*.yaml)   within this
+ tick_min/max     │                                                window
+ zero_offset   ───┼─▶ effective_limits() ─▶ ServoRobot._apply_safety()
+ direction_sign   │      (soarm_sdk)             clamps EVERY command here
+                  │
+Servo EEPROM   ───┴──────────────────────────────────▶ the servo obeys THIS,
+MIN/MAX_ANGLE       (never read by any layer above —      not the clamped value
+_LIMIT (reg 9/11)    until this session's read_angle_limits)</pre>
+    <p>Layers 5–7 decide what gets <em>planned</em>. Layers 1–3 decide what gets
+      <em>commanded</em>. They meet only at layer 4 — the calibration file. If its
+      <code>tick_min/tick_max</code> don't match what's actually in EEPROM, every layer
+      above plans against a window layer&nbsp;1 will not actually allow, and nothing
+      compares them.</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">02</span><h2>What's wrong right now</h2></div>
+
+    <div class="callout critical">
+      <div class="cal-head">
+        <span class="badge critical"><span class="dot"></span>confirmed, live</span>
+        <span class="cal-title">The gripper cannot close</span>
+      </div>
+      <p><code>execute.py</code> commands the jaw to <code>GRIPPER_CLOSED_DEG = 5°</code>
+        (+0.0873&nbsp;rad). The gripper servo's EEPROM floor is +0.3373&nbsp;rad
+        (1271 ticks). Every pick-and-place grasp will silently fail to close on
+        the object — hidden so far because only TCP-only plans (no grasp segment)
+        have run.</p>
+      <div class="readout">
+        <div class="r"><span class="k">commanded</span><span class="v tabular">+0.0873 rad</span></div>
+        <div class="r"><span class="k">measured stop</span><span class="v tabular">+0.3419 rad</span></div>
+        <div class="r"><span class="k">current draw</span><span class="v tabular">0 mA</span></div>
+        <div class="r"><span class="k">signature</span><span class="v">firmware clamp</span></div>
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <div class="cal-head">
+        <span class="badge warn"><span class="dot"></span>latent, unresolved</span>
+        <span class="cal-title">elbow_flex — 0.95 rad of unverified phantom range</span>
+      </div>
+      <p>The planner is allowed to −1.4235 rad; the servo floor reads −0.4771 rad.
+        Unlike <code>wrist_flex</code> this is <b>not yet confirmed artificial</b> —
+        the current/load signature says gravity and friction, not a firmware wall,
+        but the probe used here couldn't overcome gravity to reach the floor and settle it.</p>
+    </div>
+
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>signal at the stop</th><th class="num">wrist_flex (confirmed artificial)</th><th class="num">elbow_flex (unresolved)</th></tr></thead>
+        <tbody>
+          <tr><td>current draw</td><td class="num tabular">0 – 6 mA</td><td class="num tabular">52 – 104 mA</td></tr>
+          <tr><td>load</td><td class="num tabular">0 %</td><td class="num tabular">16.4 %, sustained</td></tr>
+          <tr><td>stop point vs. push force</td><td class="num">fixed, same tick every time</td><td class="num">moved — 2271 → 2207</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Also present</h3>
+    <p><b>Cosmetic:</b> four joints' planner bounds (<code>shoulder_pan</code>,
+      <code>shoulder_lift</code>, <code>wrist_roll</code>, <code>gripper</code>) are
+      narrower than measured travel allows — lost workspace, not a hazard.</p>
+    <p><b>A gap in this session's own fix:</b> <code>_within_servo_limits()</code> is
+      wired into the dashboard's execute path only. A bare
+      <code>python&nbsp;-m&nbsp;soarm_tamp.execute</code> — the exact path used to verify
+      every fix here — has no servo-limit preflight at all.</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">03</span><h2>How professional stacks solve this</h2></div>
+    <p class="sec-intro">Not a new problem — the standard failure mode of any motion stack
+      with more than one place that thinks it owns "how far can this joint go."
+      Four ecosystems, checked against this arm's exact situation.</p>
+
+    <div class="patterns">
+      <div class="pattern">
+        <span class="vendor">ros2_control</span>
+        <p>Names the two tiers explicitly — <b>hard limits</b> (physical/firmware)
+          and <b>soft limits</b> (where a controller starts constraining, strictly
+          inside the hard ones). A soft limit outside its hard limit is a load-time
+          config error, not a runtime surprise. <code>enforce_command_limits</code>
+          makes enforcement mandatory, not opt-in.</p>
+        <p class="lesson">Nothing here validates layer 5 sits inside layer 1 at
+          load time. <b>unreachable_bounds()</b> is the first check that does — and
+          only for the planner YAML.</p>
+      </div>
+      <div class="pattern">
+        <span class="vendor">Universal Robots</span>
+        <p>Safety Configuration limits are checksummed, need a safety-system restart
+          to change. If the arm's actual position is outside the configured limit at
+          power-on, the controller enters <b>Recovery</b> and refuses every program
+          until a person moves the arm back in range.</p>
+        <p class="lesson">Disagreement between believed and actual state <b>halts,
+          it does not clamp</b> — the pattern behind this session's own
+          <code>_within_servo_limits()</code>, but UR runs it at connection time,
+          not only right before one execute.</p>
+      </div>
+      <div class="pattern">
+        <span class="vendor">Franka Emika</span>
+        <p><code>libfranka</code> raises a typed exception on a limit violation, never
+          a print a caller can scroll past. Separately, it refuses to talk to a robot
+          whose firmware version doesn't match what the library expects.</p>
+        <p class="lesson">The calibration file <b>is</b> this arm's "compiled
+          assumption" about the servos. This bug is structurally a firmware/library
+          version mismatch — the calibration described a tick frame the servos no
+          longer report in.</p>
+      </div>
+      <div class="pattern">
+        <span class="vendor">MoveIt</span>
+        <p><code>joint_limits.yaml</code> is generated as an exact copy of the URDF;
+          a user may only edit it <b>narrower</b>, never wider. One direction is
+          allowed away from the source.</p>
+        <p class="lesson"><code>so101.yaml</code> and <code>conventions.URDF_LIMITS</code>
+          are two hand-copies of the same six numbers — identical today by diligence,
+          not by construction. The YAML bound that went <b>wider</b> than the servo
+          (§02) is exactly the forbidden direction.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">04</span><h2>Fixed this session</h2></div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>change</th><th>where</th><th>result</th></tr></thead>
+        <tbody>
+          <tr><td><code>read_angle_limits()</code></td><td class="num">soarm_sdk/hardware.py</td><td><span class="flag good">first read of layer 1, ever</span></td></tr>
+          <tr><td><code>phantom_range()</code></td><td class="num">conventions.py</td><td>belief (layer 5) vs. servo (layer 1)</td></tr>
+          <tr><td><code>unreachable_bounds()</code></td><td class="num">conventions.py</td><td>catches bounds too <i>wide</i>, not just stale</td></tr>
+          <tr><td><code>_within_servo_limits()</code></td><td class="num">dashboard/_common.py</td><td>refuses + names the joint, dashboard path</td></tr>
+          <tr><td><code>_Adrift</code> abort</td><td class="num">execute.py</td><td>stops a run &gt;3× sync_tol behind, mid-flight</td></tr>
+          <tr><td>wrist_flex EEPROM widened</td><td class="num">servo 4, reg 11</td><td class="num tabular">3046 → 3546 ticks</td></tr>
+          <tr><td>calibration + YAML corrected</td><td class="num"><code>with_travel()</code></td><td><span class="flag good">2 plans executed clean, 0 clamps</span></td></tr>
+          <tr><td>elbow_flex probed</td><td class="num">servo 3</td><td>no stop found — EEPROM left unchanged</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-num">05</span><h2>Recommendations</h2></div>
+    <ol class="reco">
+      <li><span class="n">01</span><div><b>Fix the gripper the same way as the wrist.</b> Measure the true
+        closed-jaw stop, widen the EEPROM floor just above it, correct the calibration
+        and <code>GRIPPER_CLOSED_DEG</code> to match. The one item here that fails on
+        the next grasp attempt if left alone.</div></li>
+      <li><span class="n">02</span><div><b>Move the servo-limit check into <code>execute.py</code> itself</b>
+        so it runs on every path, dashboard or bare CLI — the ros2_control pattern of
+        validation the caller cannot opt out of.</div></li>
+      <li><span class="n">03</span><div><b>Run <code>phantom_range()</code> at connection time</b>, not only
+        before execute — the UR pattern. Diff the calibration against the live servos
+        the moment the bus opens, and refuse to proceed on disagreement.</div></li>
+      <li><span class="n">04</span><div><b>Collapse the duplicate URDF limit copies</b> into one generated
+        source, the way MoveIt derives <code>joint_limits.yaml</code> from the URDF
+        instead of retyping it.</div></li>
+      <li><span class="n">05</span><div><b>Version the calibration against the EEPROM it was measured
+        from</b> — the Franka pattern. Record each joint's servo limits inside the
+        calibration file at ROM-sweep time, so a future check catches "the servo
+        changed since" as well as "the calibration was always wrong."</div></li>
+      <li><span class="n">06</span><div><b>Re-run the ROM sweep for elbow_flex</b> in wheel mode, which
+        drives to an actual stall — the only way to settle its 0.95 rad of phantom
+        range, which this session's torque-limited probe could not.</div></li>
+      <li><span class="n">07</span><div><b>Adopt the one-directional derivation rule explicitly</b>: any
+        config derived from another may only narrow it, never widen it.
+        <code>unreachable_bounds()</code> already checks this for the planner YAML;
+        worth generalizing to every derived layer in the map above.</div></li>
+    </ol>
+  </section>
+
+  <footer>
+    Servo EEPROM backups: servo_eeprom_backup_20260914.json ·
+    servo_eeprom_backup_elbow_20260914.json ·
+    ~/.soarm_sdk/calibration.backup-20260914.json<br>
+    Companion document: soarm_tamp/docs/joint-limits-architecture.md
+  </footer>
+
+</div>

@@ -221,6 +221,64 @@ def safe_planning_bounds(cal: "RobotCalibration") -> list[tuple[float, float]]:
 BOUNDS_TOLERANCE_RAD = 2e-4
 
 
+def _yaml_bounds_by_name(config_path: str | Path) -> dict[str, tuple[float, float]]:
+    """Parse the ``joint_groups`` bounds out of a task YAML, by joint name.
+
+    Shared by :func:`stale_bounds` and :func:`unreachable_bounds` so there is
+    exactly one regex that knows this file's shape, not two that could drift
+    apart from each other.
+    """
+    import re
+
+    text = Path(config_path).read_text()
+    pat = re.compile(
+        r"joint: so101/(?P<name>\w+),\s*initial:\s*[-\d.]+,\s*"
+        r"bounds: \[\s*(?P<lo>[-\d.]+),\s*(?P<hi>[-\d.]+)\s*\]"
+    )
+    return {
+        m.group("name"): (float(m.group("lo")), float(m.group("hi")))
+        for m in pat.finditer(text)
+    }
+
+
+def assert_narrows(
+    source: Sequence[tuple[float, float]],
+    derived: Sequence[tuple[float, float]],
+    names: Sequence[str],
+    *,
+    tolerance_rad: float = BOUNDS_TOLERANCE_RAD,
+) -> list[str]:
+    """Joints where *derived* claims range that *source* does not actually have.
+
+    The rule this stack broke and every mature motion framework enforces
+    explicitly (ros2_control's hard/soft split, MoveIt generating
+    ``joint_limits.yaml`` from a URDF and only allowing edits to narrow it):
+    a config derived from another may shrink it, never grow it. *source* is
+    the ground truth for one comparison — a servo's EEPROM, a calibration's
+    measured travel, a URDF — and *derived* is whatever downstream config
+    claims to operate within it.
+
+    Both :func:`phantom_range` (servo vs. the stack's belief) and
+    :func:`unreachable_bounds` (the arm vs. the planner YAML) are this
+    function with different *source*/*derived* pairs; new boundaries in the
+    stack should be a new call to this, not a new bespoke comparison.
+
+    Returns one message per joint where *derived* reaches outside *source*
+    in either direction, beyond *tolerance_rad*. Order-independent per pair;
+    *names* just labels each ``(source, derived)`` pair for the message.
+    """
+    out: list[str] = []
+    for name, (s_lo, s_hi), (d_lo, d_hi) in zip(names, source, derived):
+        notes = []
+        if s_lo - d_lo > tolerance_rad:
+            notes.append(f"lower {d_lo:+.4f} claimed vs {s_lo:+.4f} actual")
+        if d_hi - s_hi > tolerance_rad:
+            notes.append(f"upper {d_hi:+.4f} claimed vs {s_hi:+.4f} actual")
+        if notes:
+            out.append(f"{name}: " + "; ".join(notes) + " (past what the source allows)")
+    return out
+
+
 def stale_bounds(
     cal: "RobotCalibration", config_path: str | Path
 ) -> list[str]:
@@ -237,24 +295,18 @@ def stale_bounds(
     than following it.
 
     So compare, and say which joints and which way. Returned as strings
-    rather than raised, so every stale joint is reported at once.
+    rather than raised, so every stale joint is reported at once. Unlike
+    :func:`unreachable_bounds`, reports *both* directions — a narrow bound
+    is only a cost in reach, not a hazard, but it is still worth a person's
+    attention.
     """
-    import re
-
-    text = Path(config_path).read_text()
     want = dict(zip(JOINT_ORDER, safe_planning_bounds(cal)))
-    pat = re.compile(
-        r"joint: so101/(?P<name>\w+),\s*initial:\s*[-\d.]+,\s*"
-        r"bounds: \[\s*(?P<lo>[-\d.]+),\s*(?P<hi>[-\d.]+)\s*\]"
-    )
-    seen = set()
+    have = _yaml_bounds_by_name(config_path)
     out: list[str] = []
-    for m in pat.finditer(text):
-        name = m.group("name")
-        seen.add(name)
-        if name not in want:
+    for name in JOINT_ORDER:
+        if name not in have:
             continue
-        lo, hi = float(m.group("lo")), float(m.group("hi"))
+        lo, hi = have[name]
         w_lo, w_hi = want[name]
         notes = []
         if abs(lo - w_lo) > BOUNDS_TOLERANCE_RAD:
@@ -265,10 +317,125 @@ def stale_bounds(
             notes.append(f"upper {hi:+.4f} vs {w_hi:+.4f} ({way})")
         if notes:
             out.append(f"{name}: " + "; ".join(notes))
-    missing = [n for n in JOINT_ORDER if n not in seen]
+    missing = [n for n in JOINT_ORDER if n not in have]
     if missing:
         out.append(f"not in the config at all: {', '.join(missing)}")
     return out
+
+
+def unreachable_bounds(
+    cal: "RobotCalibration", config_path: str | Path
+) -> list[str]:
+    """Joints the planner is allowed to use past where this arm can go.
+
+    The dangerous half of :func:`stale_bounds`. A bound that is too *narrow*
+    costs reach the arm has; a bound that is too *wide* produces a plan the
+    arm cannot execute — and it does not fail loudly. Every command is
+    clamped at the real limit, so the joint parks against its hard stop
+    while the trajectory carries on asking for more, and the only symptom is
+    the arm quietly falling behind a path it can never reach.
+
+    Measured here: ``wrist_flex`` bounded at +1.6581 in the YAML against a
+    mechanism that stops at +1.2686. A plan through +1.5136 left the joint
+    0.245 rad behind — precisely the overshoot — for the rest of the run.
+    """
+    have = _yaml_bounds_by_name(config_path)
+    names = [n for n in JOINT_ORDER if n in have]
+    source = dict(zip(JOINT_ORDER, safe_planning_bounds(cal)))
+    return assert_narrows(
+        source=[source[n] for n in names],
+        derived=[have[n] for n in names],
+        names=names,
+    )
+
+
+#: Range smaller than this is not worth reporting: a tick either way is
+#: rounding, not a joint the arm cannot use.
+PHANTOM_TOLERANCE_RAD = 0.02
+
+
+def phantom_range(
+    cal: "RobotCalibration", servo_limits_ticks: dict[int, tuple[int, int]]
+) -> list[str]:
+    """Range the stack believes in that the servos' own firmware forbids.
+
+    Every layer here — :func:`safe_planning_bounds`, the planner's YAML,
+    ``ServoRobot``'s enforced limits — derives what the arm can reach from
+    the *calibration*. None of them ask the servos, which carry their own
+    MIN/MAX_ANGLE_LIMIT in EEPROM and enforce it below everything software
+    can see.
+
+    When those disagree the failure is silent and very hard to read. A goal
+    past a servo's cap is accepted into GOAL_POSITION, reports no error and
+    draws no current, and the joint simply stops contributing to the
+    trajectory. Measured on thanh_arm: servo 4 (``wrist_flex``) caps at 3046
+    ticks against a calibration that recorded 3314, so a plan through
+    +1.2390 rad left the joint parked at +0.8544 for an entire run — every
+    remaining waypoint timing out against an arrival that could not happen,
+    which is what turned the arm's motion into stop-start.
+
+    *servo_limits_ticks* maps servo id -> (min_ticks, max_ticks), as
+    :meth:`ServoHardwareInterface.read_angle_limits` returns it.
+    """
+    believed = safe_planning_bounds(cal)
+    names, source, derived = [], [], []
+    for i, (sid, j) in enumerate(zip(sorted(servo_limits_ticks), cal.joints)):
+        min_t, max_t = servo_limits_ticks[sid]
+        if min_t < 0 or max_t < 0:
+            continue
+        a, b = j.to_rad(min_t), j.to_rad(max_t)
+        names.append(f"{j.name} (servo {sid})")
+        source.append((min(a, b), max(a, b)))
+        derived.append(believed[i])
+    return assert_narrows(
+        source=source, derived=derived, names=names,
+        tolerance_rad=PHANTOM_TOLERANCE_RAD,
+    )
+
+
+def waypoints_beyond_servo_limits(
+    waypoint_rows: Sequence[Sequence[float]],
+    servo_limits_ticks: dict[int, tuple[int, int]],
+    cal: "RobotCalibration",
+    joint_ids: Sequence[int],
+) -> dict[str, tuple[float, float, float, float]]:
+    """The worst violation per joint, for a manifest against the live servos.
+
+    Shared by the dashboard's pre-execute check and ``execute.py``'s own —
+    before this, only the dashboard path checked, so the bare
+    ``python -m soarm_tamp.execute`` CLI used to verify every other fix in
+    this document had no servo-limit preflight at all.
+
+    *waypoint_rows* are JOINT_ORDER-ordered radian rows (a manifest's raw or
+    resampled waypoints). *servo_limits_ticks* maps servo id -> raw
+    ``(min, max)`` ticks, as :meth:`ServoHardwareInterface.read_angle_limits`
+    returns it. *joint_ids* is the servo id at each JOINT_ORDER position —
+    positional, the same convention used everywhere else in this stack.
+
+    Returns ``{name: (over, value, lo, hi)}`` for joints the plan asks past
+    the live servo range; empty when the whole manifest is within it. A goal
+    past a servo's cap is accepted and silently never acted on — no error,
+    no current draw — so this exists to say so *before* streaming it, not
+    after the joint has quietly stopped moving.
+    """
+    allowed: dict[str, tuple[float, float]] = {}
+    for sid, j in zip(joint_ids, cal.joints):
+        lims = servo_limits_ticks.get(sid)
+        if lims is None or lims[0] < 0 or lims[1] < 0:
+            continue
+        a, b = j.to_rad(lims[0]), j.to_rad(lims[1])
+        allowed[j.name] = (min(a, b), max(a, b))
+
+    worst: dict[str, tuple[float, float, float, float]] = {}
+    for row in waypoint_rows:
+        for name, value in zip(JOINT_ORDER, row):
+            if name not in allowed:
+                continue
+            lo, hi = allowed[name]
+            over = max(lo - value, value - hi, 0.0)
+            if over > worst.get(name, (0.0, 0.0, 0.0, 0.0))[0]:
+                worst[name] = (over, value, lo, hi)
+    return worst
 
 
 def format_bounds_yaml(bounds: Sequence[tuple[float, float]]) -> str:

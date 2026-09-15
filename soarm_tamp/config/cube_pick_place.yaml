@@ -58,8 +58,23 @@ joint_groups:
   SO101:
     - {joint: so101/shoulder_pan,   initial:  0.0,    bounds: [-1.9199, 1.9199]}
     - {joint: so101/shoulder_lift,  initial:  0.0,    bounds: [-1.7453, 1.6415]}
+    # wrist_flex's upper bound is the servo's own EEPROM cap (3546 ticks),
+    # not the URDF's +1.6581. That cap is the only limit here that is
+    # measured rather than believed: the calibration's travel numbers were
+    # recorded before the arm was re-zeroed, so they describe a frame the
+    # servos no longer report in, and deriving bounds from them narrowed
+    # this joint to +1.2686 — tight enough that the TCP goal stopped
+    # solving. Read the servos instead; conventions.phantom_range() does.
+    #
+    # It matters because the failure it produces is unreadable. A goal past
+    # a servo's cap is accepted into GOAL_POSITION, raises no error and
+    # draws no current, and the joint simply stops moving while the rest of
+    # the arm carries on. Measured here before the cap was widened:
+    # wrist_flex sat at +0.8544 for a whole run, every remaining waypoint
+    # timing out at 2s against an arrival that could not come, which is
+    # what made the motion stop-start.
     - {joint: so101/elbow_flex,     initial:  0.0,    bounds: [-1.5462, 1.6900]}
-    - {joint: so101/wrist_flex,     initial:  0.0,    bounds: [-1.6581, 1.6581]}
+    - {joint: so101/wrist_flex,     initial:  0.0,    bounds: [-1.6581, 1.6245]}
     - {joint: so101/wrist_roll,     initial:  0.0,    bounds: [-2.7439, 2.8412]}
     - {joint: so101/gripper,        initial:  0.1745, bounds: [-0.1745, 1.7453]}
 

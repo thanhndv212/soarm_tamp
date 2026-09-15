@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, List, Optional
 
 from ..container import ContainerJob, available, kill_in_container
-from ..player import ManifestPlayer
+from ..player import ManifestPlayer, load_segments
 from ..runner import ExecutionJob
 
 __all__ = ["Console", "PlanControls", "VIEWER_PATTERN"]
@@ -126,31 +126,107 @@ class PlanControls:
         return False
 
     def _bounds_current(self) -> bool:
-        """Warn when the planner's YAML bounds no longer match the arm.
+        """Check the planner's YAML bounds against the arm's real travel.
 
-        A warning rather than a refusal: unlike an unsaved calibration,
-        stale bounds do not make the plan describe a different arm, they
-        make it reach for angles this one cannot hold. That is worth
-        stopping for when it is too wide and merely wasteful when it is too
-        narrow, and the message says which — but a run that is deliberately
-        conservative is still a run worth having.
+        Too *narrow* is a warning: the plan is merely conservative, and a
+        run that gives up some reach is still a run worth having. Too
+        *wide* refuses, because the plan it produces cannot be executed and
+        does not fail in any way a person watching would recognise —
+        ServoRobot clamps every command at the real limit, the joint parks
+        against its hard stop, and execute.py waits --sync-timeout at each
+        remaining waypoint for an arrival that is not coming. That reads as
+        a stuttering arm, not as a bad plan, which is why this used to
+        reach hardware: the returned False was only ever printed, never
+        acted on.
         """
         try:
-            from ...conventions import calibration_path, stale_bounds
+            from ...conventions import (
+                calibration_path, stale_bounds, unreachable_bounds,
+            )
             from soarm_sdk.calibration.frame import RobotCalibration
 
             cfg = Path(__file__).resolve().parents[2] / "config" / "cube_pick_place.yaml"
             if not cfg.exists():
                 return True
-            bad = stale_bounds(RobotCalibration.load(calibration_path()), cfg)
+            cal = RobotCalibration.load(calibration_path())
+            bad = stale_bounds(cal, cfg)
+            unreachable = unreachable_bounds(cal, cfg)
         except Exception:
             return True
         if not bad:
             return True
+        if unreachable:
+            self.console.say(
+                "cannot plan: the planner may use angles this arm cannot reach"
+            )
+            for line in unreachable:
+                self.console.say(f"  {line}")
+            self.console.say("  regenerate with conventions.format_bounds_yaml()")
+            return False
         self.console.say("WARNING: planner bounds are stale vs. this calibration")
         for line in bad:
             self.console.say(f"  {line}")
         self.console.say("  regenerate with conventions.format_bounds_yaml()")
+        return True
+
+    def _within_servo_limits(self) -> bool:
+        """Refuse a run whose waypoints the servos' own firmware will not obey.
+
+        Every reachability check above this one is derived from the
+        calibration. The servos are not: each carries MIN/MAX_ANGLE_LIMIT in
+        EEPROM and enforces it underneath everything software can see, and
+        on this arm they disagree — ``wrist_flex`` caps at +0.8575 rad
+        against a calibration that says +1.2686.
+
+        A goal past the cap is the worst kind of failure to read: the servo
+        accepts it, reports no error, draws no current, and does not move.
+        The joint drops out of the trajectory while every other joint keeps
+        going, execute.py waits --sync-timeout at each remaining waypoint
+        for an arrival that cannot come, and what a person sees is an arm
+        that stutters — with nothing anywhere naming the joint. So check the
+        actual waypoints against the actual servos, and say which.
+        """
+        from ...conventions import calibration_path, waypoints_beyond_servo_limits
+
+        try:
+            from soarm_sdk.calibration.frame import RobotCalibration
+
+            cal = RobotCalibration.load(calibration_path())
+            segments = load_segments(self.run_dir)
+            with self.ctx.bus() as srv:
+                limits = {
+                    sid: (
+                        srv.read2ByteTxRx(sid, 9).data[0],
+                        srv.read2ByteTxRx(sid, 11).data[0],
+                    )
+                    for sid in self.ctx.joint_ids
+                }
+        except Exception:
+            return True  # no bus, no manifest, no calibration: not this check's call
+
+        worst = waypoints_beyond_servo_limits(
+            [q for seg in segments for q in seg["waypoints"]],
+            limits, cal, self.ctx.joint_ids,
+        )
+        if not worst:
+            return True
+
+        self.console.say("cannot execute: the servos will not obey this plan")
+        for name, (over, value, lo, hi) in sorted(
+            worst.items(), key=lambda kv: -kv[1][0]
+        ):
+            self.console.say(
+                f"  {name}: plan reaches {value:+.4f}, servo allows "
+                f"{lo:+.4f}..{hi:+.4f} ({over:.4f} rad past it)"
+            )
+        self.console.say(
+            "  The servo accepts such a goal and ignores it silently — the "
+            "joint stops moving and the rest of the arm keeps going."
+        )
+        self.console.say(
+            "  Either widen that servo's EEPROM angle limit or re-plan "
+            "against bounds that respect it."
+        )
         return False
 
     # -- starting where the arm actually is -----------------------------
@@ -340,6 +416,9 @@ class PlanControls:
             return
         if not dry_run and not port:
             self.console.say("no serial port set in the sidebar")
+            return
+        # Live only: it reads the servos, and a dry run has none to read.
+        if not dry_run and not self._within_servo_limits():
             return
         self.exec_job = ExecutionJob(
             self.ctx,

@@ -417,7 +417,18 @@ def run(
             max_step_rad=max(servo_clamp, max_step),
             enforce_limits=True,
         )
-        robot.connect()
+        # connect() now refuses (via ServoHardwareInterface's own
+        # verify_eeprom_limits check) if the calibration's recorded EEPROM
+        # limits disagree with what the servos report today — the same
+        # failure mode that let wrist_flex cap 0.41 rad short of what every
+        # layer above believed, caught here instead of as a stalled joint
+        # mid-plan. Silent (not skipped — silent, by design) for a
+        # calibration that never recorded EEPROM limits in the first place.
+        try:
+            robot.connect()
+        except RuntimeError as exc:
+            print(f"REFUSING TO RUN: {exc}", file=sys.stderr)
+            return 1
 
         # Do not command anything until the bus has actually answered.
         # ServoHardwareInterface serves a placeholder 2048 ticks per joint
@@ -439,6 +450,39 @@ def run(
                 robot.disconnect()
                 return 1
             time.sleep(0.05)
+
+        # Belt-and-suspenders with the dashboard's own pre-execute check
+        # (soarm_tamp.dashboard.panels._common.PlanControls._within_servo_limits),
+        # and the one that actually matters for the bare CLI path used to
+        # verify every fix in this document: check the manifest's own
+        # waypoints against what the servos will actually obey, not just
+        # whether the calibration's recorded EEPROM agrees with them.
+        from .conventions import waypoints_beyond_servo_limits
+
+        live_limits = robot.hw.read_angle_limits()
+        joint_ids = _robot_config().get("hardware", {}).get("servo_ids", [1, 2, 3, 4, 5, 6])
+        worst = waypoints_beyond_servo_limits(
+            [q for seg in segments for q in seg["q"]],
+            live_limits, cal, joint_ids,
+        )
+        if worst:
+            print("REFUSING TO RUN: the servos will not obey this plan:", file=sys.stderr)
+            for name, (over, value, lo, hi) in sorted(
+                worst.items(), key=lambda kv: -kv[1][0]
+            ):
+                print(
+                    f"  {name}: plan reaches {value:+.4f}, servo allows "
+                    f"{lo:+.4f}..{hi:+.4f} ({over:.4f} rad past it)",
+                    file=sys.stderr,
+                )
+            print(
+                "  A goal past a servo's cap is accepted and silently never "
+                "acted on. Widen that servo's EEPROM angle limit, or "
+                "re-plan against bounds that respect it.",
+                file=sys.stderr,
+            )
+            robot.disconnect()
+            return 1
 
     period = 1.0 / rate_hz
     started = time.time()
