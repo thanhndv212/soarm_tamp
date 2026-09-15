@@ -5,11 +5,11 @@ RUNS ON THE HOST, with the arm connected.
 
     python -m soarm_tamp.validate_calibration --port /dev/cu.usbmodemXXXX
 
-``soarm_sdk.calibration.seed`` produces a calibration offline, but it can
-only *estimate*: the direction signs are assumed +1, because a travel range
-says how far a joint moves and not which end is which. This walks the
-escalating checks that settle it, and marks the file validated only when
-they all pass.
+``soarm-calibrate-rom`` measures a calibration from the arm's own hard
+stops, but it can only *estimate*: the direction signs are assumed +1,
+because a travel range says how far a joint moves and not which end is
+which. This walks the escalating checks that settle it, and marks the
+file validated only when they all pass.
 
 The rungs, in order, each gated on the one before:
 

@@ -27,9 +27,9 @@ from typing import TYPE_CHECKING, Sequence
 if TYPE_CHECKING:  # pragma: no cover
     from soarm_sdk.calibration.frame import RobotCalibration
 
-# so101_new_calib.urdf joint limits, URDF joint order. Duplicated from
-# soarm_sdk.calibration.seed on purpose: the container-side planner reads
-# these without the SDK installed.
+# so101_new_calib.urdf joint limits, URDF joint order. Duplicated from the
+# URDF itself on purpose: the container-side planner reads these without
+# the SDK installed.
 URDF_LIMITS: dict[str, tuple[float, float]] = {
     "shoulder_pan": (-1.91986, 1.91986),
     "shoulder_lift": (-1.74533, 1.74533),
@@ -41,8 +41,8 @@ URDF_LIMITS: dict[str, tuple[float, float]] = {
 
 JOINT_ORDER: tuple[str, ...] = tuple(URDF_LIMITS)
 
-#: Where the SDK's seeding CLI writes by default. Override with
-#: ``SOARM_CALIBRATION`` for a second arm.
+#: Where soarm-calibrate-rom / soarm-dashboard-calibration write by
+#: default. Override with ``SOARM_CALIBRATION`` for a second arm.
 DEFAULT_CALIBRATION = Path.home() / ".soarm_sdk" / "calibration.json"
 
 
@@ -59,8 +59,10 @@ def load_calibration(path: str | Path | None = None) -> "RobotCalibration":
     if not p.exists():
         raise FileNotFoundError(
             f"no calibration at {p}\n"
-            "  Seed one (no hardware needed):\n"
-            "    soarm-seed-calibration --lerobot <lerobot.json>"
+            "  Measure one on the arm:\n"
+            "    soarm-calibrate-rom --arm-id <name>\n"
+            "  then confirm it (or work through the guided dashboard):\n"
+            "    soarm-dashboard-calibration"
         )
     return RobotCalibration.load(p)
 

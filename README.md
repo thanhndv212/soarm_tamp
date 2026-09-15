@@ -37,7 +37,7 @@ pip install -e ".[host]"
 A Viser plan-and-run dashboard, built on `soarm_sdk`'s dashboard shell:
 
 ```bash
-soarm-tamp-dashboard --port 8080     # after pip install -e ".[host]"
+soarm-dashboard-tamp --port 8080     # after pip install -e ".[host]"
 python -m soarm_tamp.dashboard       # from a checkout, same thing
 ```
 
@@ -61,16 +61,16 @@ The planning URDF, `soarm_sdk`, and lerobot each use a different
 joint-angle zero. That mapping lives in `soarm_sdk.calibration`, shared
 with RL deployment rather than reimplemented here.
 
-It is **seeded offline** from measured travel plus the URDF's joint limits,
-once per arm:
+It is **measured on the arm**, once per arm, from its own hard stops plus
+the URDF's joint limits — not borrowed from another tool's calibration
+file, which would be a measurement of whatever produced that file, not of
+this arm:
 
 ```bash
-soarm-seed-calibration \
-  --lerobot ~/.cache/huggingface/lerobot/calibration/robots/so101_follower/thanh_arm.json \
-  --arm-id thanh_arm
+soarm-calibrate-rom --arm-id thanh_arm
 ```
 
-The seed cannot recover the direction signs — a travel range says how far a
+The sweep cannot recover the direction signs — a travel range says how far a
 joint moves, not which end is which — so it is written `validated: false`
 and `execute.py` refuses to stream against it until validation completes:
 
