@@ -10,6 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Initial development. Nothing released yet, and nothing has run on the
 physical arm yet — see "Not yet done" below.
 
+### Added
+
+- **The dashboard's `--rerun` flag**, feeding its streaming interface's
+  telemetry to a spawned Rerun viewer (`soarm_sdk.monitoring.blueprint`'s
+  by-servo/by-channel layouts) alongside the TCP/pick-and-place controls,
+  on the same connection. `build_app()` also takes `rerun=` directly, for
+  a caller building a dashboard programmatically rather than through the
+  CLI.
+
+### Changed
+
+- **`__main__.py` now registers its `plan_and_run` profile against
+  `soarm_sdk.cli.dashboard.launch()`** instead of hand-rolling a second
+  copy of the device/baud/urdf/stream argument definitions and
+  auto-device-selection logic. That copy had already fallen behind once —
+  it had no `--rerun` flag until one was ported over by hand — because
+  `soarm_sdk`'s version of the same logic wasn't reusable outside that
+  package until now. Streaming stays on by default (`--no-stream` to opt
+  out), since the TCP/pick-and-place panels need the persistent interface
+  regardless.
+
 ### Fixed
 
 - **`validate_calibration` could not complete any of its three rungs.**
