@@ -2,9 +2,11 @@
 
 A plan certified collision-free by HPP is not automatically a plan the
 servos can track. This is the incident that established why, and the
-tuning knobs it produced. The short version lives in the
-[README's Execution tuning section](../README.md#execution-tuning); this is
-the full account, with the measurements behind each conclusion.
+tuning knobs it produced. The short version lives in
+[`docs/writing-a-new-task.md`'s Execution tuning section](writing-a-new-task.md#execution-tuning);
+this is the full account, with the measurements behind each conclusion. For
+what the code actually does, in order, see
+["The mechanism, end to end"](#the-mechanism-end-to-end) below.
 
 ## What happened
 
@@ -121,3 +123,80 @@ travel-span mismatch the calibration check flags is not what broke the
 run). The laddered mode measures something else entirely — how much of each
 step the servo completes before the next command — and must not be read as
 a mapping check.
+
+## The mechanism, end to end
+
+Everything above explains *why* the knobs exist. This is *what the code
+actually does*, in order, from a manifest on disk to a command on the wire
+— all in `execute.py::run()`, the only module that touches the servos.
+
+1. **Load.** `_load_segments(run_dir)` reads `manifest.json` and each
+   segment's own JSON file — a list of waypoints (`seg["q"]`), plus
+   `kind`/`edge` (which task-graph transition this is) and, if HPP
+   time-parameterized it, per-step `dt` and a `timed` flag.
+   `_gripper_plan(segments)` separately extracts which segment boundaries
+   open or close the jaw, from the manifest's own labels — grasp and
+   release are rigid constraints to HPP, never a gripper trajectory it
+   plans, so this information lives beside the path, not in it.
+
+2. **Resample, per segment — HPP's own waypoints are never streamed
+   verbatim.** `_resample(seg["q"], max_step, dt_if_timed)` re-interpolates
+   so no joint moves more than `--max-step` between commands, producing
+   `qs` (the finer waypoint list) and `schedule` (either the plan's own
+   per-step dwell times, if time-parameterized, or nothing — see
+   `--no-plan-timing` to force the flat-rate case even when timing exists).
+
+3. **Command, one resampled waypoint at a time.** For each `q_urdf` in
+   `qs`:
+   - The gripper axis (index 5) is overwritten with `current_gripper_rad`
+     — the plan's own row still carries whatever the jaw measured at
+     t = 0, frozen, in *every* waypoint of *every* segment; this
+     substitution is what actually tracks the intended jaw state once a
+     close/open has fired (see "One more trap, fixed" below for the bug
+     this replaced).
+   - A velocity feedforward `dq` is computed from this step's size over
+     its time span (the plan's own dwell, or the fixed command period),
+     scaled by `--speed-scale` — this becomes the servo's `GOAL_SPEED`, so
+     consecutive commands blend into one ramp instead of each running its
+     own accel/decel (see "Making it smooth" above).
+   - `robot.set_joint_positions(target, dq=dq)` sends it. `ServoHardwareInterface`
+     (in `soarm_sdk`, not this module) enforces joint limits and clamps the
+     command to `max(--servo-clamp, --max-step)` of the *measured*
+     position regardless of what was asked for — a safety floor under
+     every caller of that interface, not something `execute.py` has to
+     re-implement or could bypass.
+   - If `--sync` (on by default): the loop blocks in `_await_arrival` until
+     the arm is within `--sync-tol` of the target. If it cannot close that
+     gap within `--sync-timeout` and the lag exceeds `3 × sync-tol`, the
+     run raises `_Adrift` and aborts — streaming further waypoints past a
+     path the arm has already fallen off of was the original incident.
+   - The commanded (post-gripper-override) position is appended to
+     `<run>/live.jsonl` via `_Trace` — the one file `replay.py --follow`
+     reads to mirror the real arm, and the permanent record of what was
+     actually sent, sitting next to the plan it came from.
+
+4. **Pace against one wall-clock deadline per segment**, not per-step
+   sleeps — `due` accumulates the segment's schedule and each iteration
+   sleeps to that absolute deadline. Sleeping each dwell independently
+   instead was measured to compound the OS's own oversleep: a 1.35 s
+   trajectory took 2.8 s that way.
+
+5. **Settle, then act on the jaw.** After a segment's last waypoint,
+   `_settle()` re-commands the final target at full speed until within
+   `--settle-tol` — see "Settle at speed, not slowly" above for why this
+   is not a slow creep. If `_gripper_plan` marked this boundary as an open
+   or close, that command is sent and settled separately, and
+   `current_gripper_rad` is updated so the *next* segment's still-frozen
+   plan rows do not silently reopen what was just closed.
+
+6. **Report.** On exit (success, `_Adrift`, or `KeyboardInterrupt`), the
+   trace is closed and, on real hardware, the run prints how many
+   waypoints it had to stop-and-wait on, the worst lag seen, and the worst
+   settle error — the numbers every conclusion in this document is built
+   from.
+
+HPP's waypoints never reach a servo directly: they are resampled for
+step-size safety, re-timed to a wall clock, given a synthetic gripper
+trajectory, given velocity feedforward so commands blend, and gated on the
+arm actually catching up — all before `ServoHardwareInterface`'s own
+limit/step clamps get a final, independent say.

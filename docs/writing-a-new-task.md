@@ -217,7 +217,10 @@ mapping without the step clamp or path fidelity questions.
 The full incident this tuning came from — a first run that drove the hand
 into the table, the measurements behind each knob above, and why
 "settle slowly" makes it worse, not better — is in
-[`docs/execution-tuning.md`](execution-tuning.md).
+[`docs/execution-tuning.md`](execution-tuning.md). For what `execute.py`
+actually does, step by step, from a loaded manifest to a command on the
+wire, see that document's
+["The mechanism, end to end"](execution-tuning.md#the-mechanism-end-to-end).
 
 ## Planning from where the arm actually is
 
