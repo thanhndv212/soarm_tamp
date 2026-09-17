@@ -1,42 +1,36 @@
-"""``python -m soarm_tamp.dashboard`` — the plan-and-run dashboard."""
+"""``python -m soarm_tamp.dashboard`` — the plan-and-run dashboard.
+
+The CLI layer (device/baud/port/urdf/interval-ms/calibration flags, the
+streaming/rerun flags, auto-device-selection) lives in
+``soarm_sdk.cli.dashboard.launch`` — shared with ``soarm-dashboard-setup``
+and ``soarm-dashboard-calibration`` rather than a second, independently
+drifting copy of it. This module only supplies what's specific to
+soarm_tamp: which profile, which default URDF, and that streaming defaults
+on (the plan-and-run panels need the persistent interface for TCP goals
+and pick-and-place execution anyway, so there is no reason to make an
+operator ask for it — ``--no-stream`` is there for the rare case that
+matters).
+"""
 
 from __future__ import annotations
 
-import argparse
-from pathlib import Path
+from typing import List, Optional
 
-from .app import DEFAULT_URDF, build_app
+from .app import DEFAULT_URDF, profiles
+
+__all__ = ["main"]
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--device", default="", help="servo bus, e.g. /dev/cu.usbmodem...")
-    ap.add_argument("--baud", type=int, default=1_000_000)
-    ap.add_argument("--port", type=int, default=8080, help="Viser HTTP port")
-    ap.add_argument("--urdf", type=Path, default=DEFAULT_URDF)
-    ap.add_argument(
-        "--no-stream",
-        action="store_true",
-        help="use the legacy per-iteration poll instead of holding the port",
+def main(argv: Optional[List[str]] = None) -> None:
+    from soarm_sdk.cli.dashboard import launch
+
+    launch(
+        profiles()["plan_and_run"],
+        argv,
+        "soarm_tamp.dashboard",
+        default_urdf=DEFAULT_URDF,
+        default_use_stream=True,
     )
-    args = ap.parse_args()
-
-    device = args.device
-    if not device:
-        from soarm_sdk import get_available_ports
-
-        ports = get_available_ports()
-        if ports:
-            device = ports[0][0]
-            print(f"[soarm_tamp.dashboard] auto-selected {device}")
-
-    build_app(
-        device=device,
-        baud=args.baud,
-        port=args.port,
-        urdf_path=args.urdf,
-        use_stream=not args.no_stream,
-    ).run()
 
 
 if __name__ == "__main__":

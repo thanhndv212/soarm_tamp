@@ -82,6 +82,7 @@ def build_app(
     urdf_path: Optional[Path] = None,
     joint_ids: Optional[List[int]] = None,
     use_stream: bool = True,
+    rerun: bool = False,
     profile: str = "plan_and_run",
 ):
     from soarm_sdk.dashboard import DashboardApp
@@ -95,6 +96,11 @@ def build_app(
         urdf_path=urdf_path if urdf_path is not None else DEFAULT_URDF,
         joint_ids=joint_ids,
         use_stream=use_stream,
+        # Shutdown button and, when rerun=True, a Rerun telemetry feed off
+        # this same connection both come from DashboardApp itself — every
+        # profile built here gets them without this module doing anything
+        # beyond forwarding the flag. See DashboardApp's docstring.
+        rerun=rerun,
     )
     chosen.register(app)
     return app
