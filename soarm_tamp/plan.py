@@ -34,6 +34,7 @@ from long_tamp.tasks import ManipulationTask
 from long_tamp.tasks.grasp_sequence import GraspSequencePlanner
 
 from . import conventions
+from .geometry import checked_planning_jaw, validate_nominal_scene
 
 TASK_NAME = "SO-101: cube pick and place"
 
@@ -74,6 +75,7 @@ class CubePickPlaceTask(ManipulationTask):
     FREEZE_JOINT_SUBSTRINGS = FREEZE_JOINT_SUBSTRINGS
 
     def __init__(self, backend: str = "pyhpp", viewer_type: str = "auto"):
+        validate_nominal_scene(_loader._data, str(_YAML_PATH))
         super().__init__(
             task_name=TASK_NAME,
             backend=backend,
@@ -162,6 +164,13 @@ def run(
             # the arm's measured travel is wider than the URDF's limits, so a
             # joint resting past them is exactly what a slumped arm looks
             # like. Report it the way every other failure in this file is.
+            print(f"\nFAILED: {exc}")
+            return False
+        jaw_model = task.robot.model()
+        jaw_index = jaw_model.joints[jaw_model.getJointId("so101/gripper")].idx_q
+        try:
+            q_init[jaw_index] = checked_planning_jaw(q_init[jaw_index], str(start_file))
+        except ValueError as exc:
             print(f"\nFAILED: {exc}")
             return False
 

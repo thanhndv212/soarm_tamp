@@ -27,6 +27,8 @@ its local frame:
 
 from __future__ import annotations
 
+import math
+
 # --------------------------------------------------------------------------
 # Jaw opening as a function of the `gripper` joint angle.
 #
@@ -162,6 +164,57 @@ def scene_fingerprint() -> dict:
         "pick_xy": list(PICK_XY),
         "place_xy": list(PLACE_XY),
     }
+
+
+def validate_nominal_scene(config: dict, source: str) -> None:
+    """Refuse a YAML scene whose resting cube or frozen jaw disagrees with geometry."""
+    try:
+        pose = config["objects"]["cube"]["initial_pose_xyzquat"]
+        if len(pose) != 7:
+            raise ValueError("cube pose must have seven XYZQUAT values")
+        xyz = tuple(float(value) for value in pose[:3])
+        jaw = next(
+            entry
+            for group in config["joint_groups"].values()
+            for entry in group
+            if entry["joint"] == "so101/gripper"
+        )
+        jaw_rad = float(jaw["initial"])
+    except (KeyError, TypeError, ValueError, StopIteration) as exc:
+        raise ValueError(f"{source}: invalid nominal cube pose or gripper joint: {exc}") from exc
+
+    expected_xyz = (*PICK_XY, CUBE_SIZE_M / 2)
+    for axis, actual, expected in zip("xyz", xyz, expected_xyz):
+        if not math.isclose(actual, expected, rel_tol=0, abs_tol=1e-6):
+            raise ValueError(
+                f"{source}: cube initial {axis}={actual} m, expected {expected} m "
+                "from PICK_XY and CUBE_SIZE_M"
+            )
+    expected_jaw_rad = math.radians(PLANNING_JAW_DEG)
+    if not math.isclose(jaw_rad, expected_jaw_rad, rel_tol=0, abs_tol=1e-5):
+        raise ValueError(
+            f"{source}: frozen gripper initial={jaw_rad} rad, expected "
+            f"{expected_jaw_rad:.6f} rad from PLANNING_JAW_DEG"
+        )
+
+
+def checked_planning_jaw(measured_rad: float, source: str) -> float:
+    """Return the frozen planning angle after checking a measured start pose.
+
+    One degree of jaw error shifts the measured centreline by roughly 0.4 mm
+    near 20 degrees, well below the nominal 3.25 mm per-side approach gap.
+    """
+    expected = math.radians(PLANNING_JAW_DEG)
+    if not math.isfinite(measured_rad) or not math.isclose(
+        measured_rad, expected, rel_tol=0, abs_tol=math.radians(1)
+    ):
+        raise ValueError(
+            f"{source}: measured gripper={measured_rad:.6f} rad; the "
+            f"30 mm cube grasp frame requires {expected:.6f} rad "
+            f"({PLANNING_JAW_DEG:.0f} deg) within 1 deg. Set the jaw to "
+            "the planning angle and capture a new start pose."
+        )
+    return expected
 
 
 def compare_scene(recorded: dict) -> list[str]:

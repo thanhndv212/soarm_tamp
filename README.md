@@ -120,6 +120,9 @@ past contact, so the position-controlled servo grips by stalling against
 its torque limit rather than by reaching a precise "closed" angle.
 Changing these constants needs `python -m soarm_tamp.build_assets` to
 regenerate `generated/` before they take effect.
+For a pick-and-place planned from `--start`, set the physical jaw to 20°
+before recording the start pose. The planner refuses a measured jaw more
+than 1° away, because the SRDF grasp centerline was measured at 20°.
 
 **Status:** planned and dry-run verified (3 phases, 6 segments, 0 seam
 violations, 0 of 623 commands clamped) but not yet executed on the physical
