@@ -146,6 +146,9 @@ execute against stale geometry.
 
 ## Documentation
 
+- [`docs/roadmap.md`](docs/roadmap.md) — the plan to show all of
+  long-tamp on this arm (vision, stacking, AI missions, open VLM/VLA),
+  tracked in [#32](https://github.com/thanhndv212/soarm_tamp/issues/32).
 - [`docs/writing-a-new-task.md`](docs/writing-a-new-task.md) — full
   tutorial: confirming the pipeline, authoring a task's YAML config and
   plan script, execution tuning, and adding a dashboard tab for it.
