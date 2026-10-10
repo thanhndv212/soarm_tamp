@@ -33,6 +33,16 @@ physical arm yet — see "Not yet done" below.
 
 ### Fixed
 
+- **The scene still described the old 25 mm cube.** The cube started at
+  `z = 0.0125` (2.5 mm inside the table for the real 30 mm cube) and the
+  frozen jaw at 10°, while the SRDF grasp centerline is measured at 20°. The
+  cube now starts at `z = 0.015` with the jaw at 20°, its inertia follows its
+  size, and the resting height is part of the scene fingerprint, so older
+  manifests read as stale.
+- **`plan.py` refuses a scene or start pose that disagrees with `geometry.py`.**
+  The YAML cube pose and frozen jaw are checked when the task is built, and a
+  `--start` pose whose measured jaw is more than 1° off the 20° planning angle
+  is rejected with instructions to reset the jaw and re-capture it.
 - **`validate_calibration` could not complete any of its three rungs.**
   Rung 1 needs the arm limp, but `ServoRobot.connect()` enables torque and
   the SDK exposed no way to release it, so the script fell back to asking the
