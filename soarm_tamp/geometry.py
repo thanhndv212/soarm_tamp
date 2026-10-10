@@ -82,8 +82,8 @@ FINGERTIP_TABLE_CLEARANCE_M: float = 0.005
 # object's handle frame is made to coincide with this frame.
 #
 # X: the jaw centerline at PLANNING_JAW_DEG. Without this offset a grasp
-#    commanded at the frame origin would sit ~13 mm off-centre between the
-#    jaws — with a 25 mm cube in a 29 mm gap, that is a guaranteed miss.
+#    commanded at the frame origin would sit far off-centre between the
+#    jaws — even a 36.5 mm gap cannot clear a 30 mm cube at that offset.
 #
 # Z: +Z is the approach direction (world-DOWN for a top-down grasp), so a
 #    POSITIVE value puts the grasp point *below* the frame origin and so
@@ -152,6 +152,7 @@ def scene_fingerprint() -> dict:
     """The geometry constants a recorded plan depends on."""
     return {
         "cube_size_m": CUBE_SIZE_M,
+        "cube_rest_center_z_m": CUBE_SIZE_M / 2,
         "planning_jaw_deg": PLANNING_JAW_DEG,
         "grasp_centerline_x_m": round(GRASP_CENTERLINE_X_M, 6),
         "grasp_depth_z_m": round(GRASP_DEPTH_Z_M, 6),

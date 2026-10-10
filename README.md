@@ -109,7 +109,8 @@ pieces work together, and to build a different task the same way.
 `z = 0` plane. The cube starts at **A = (0.22, −0.10)** and must end at
 **B = (0.22, +0.10)**, both in metres in the robot base frame, both inside
 the verified top-down-reachable annulus (radius 0.10–0.30 m, |A| = |B| =
-0.242 m).
+0.242 m). The cube's nominal centre starts at `z = 0.015 m`, half its edge
+length above the real `z = 0` table surface.
 
 Use a **30 mm** cube — matched to the jaws, not arbitrary:
 `studies/reachability.py` measures jaw opening against the `gripper` joint

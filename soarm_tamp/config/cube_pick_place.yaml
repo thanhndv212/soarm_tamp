@@ -8,7 +8,7 @@
 # Assets under generated/ are produced by soarm_tamp/build_assets.py. Do
 # not hand-edit them; edit the builder.
 #
-# Scene: an SO-101 bolted to the table at the origin picks a 25 mm cube
+# Scene: an SO-101 bolted to the table at the origin picks a 30 mm cube
 # from A and docks it onto a named spot at B.
 
 task: soarm_cube_pick_place
@@ -48,8 +48,8 @@ environments: []
 # loses the most (1.69 -> 1.569) for the same reason.
 #
 # `gripper` is the jaw. It is frozen during planning (see freeze_joints)
-# at 10 deg = 0.1745 rad, which is a 29.1 mm opening — 4 mm of clearance
-# around the 25 mm cube. That value is not arbitrary: the grasp frame
+# at 20 deg = 0.349066 rad, which is a 36.5 mm opening — 6.5 mm of clearance
+# around the 30 mm cube. That value is not arbitrary: the grasp frame
 # baked into so101.srdf is the jaw centerline AT THIS ANGLE, so changing
 # one without the other silently moves the grasp off-centre. Both come
 # from soarm_tamp/geometry.py.
@@ -76,7 +76,7 @@ joint_groups:
     - {joint: so101/elbow_flex,     initial:  0.0,    bounds: [-1.5462, 1.6900]}
     - {joint: so101/wrist_flex,     initial:  0.0,    bounds: [-1.6581, 1.6245]}
     - {joint: so101/wrist_roll,     initial:  0.0,    bounds: [-2.7439, 2.8412]}
-    - {joint: so101/gripper,        initial:  0.1745, bounds: [-0.1745, 1.7453]}
+    - {joint: so101/gripper,        initial:  0.349066, bounds: [-0.1745, 1.7453]}
 
 # ---------------------------------------------------------------------------
 # Freeflyer bounds apply to every loaded object (SceneBuilder uses one set
@@ -115,11 +115,11 @@ objects:
     handles:
       - table/spot_b
   cube:
-    # A = (0.22, -0.10). z = 0.0125 = half the 25 mm edge, i.e. resting on
+    # A = (0.22, -0.10). z = 0.015 = half the 30 mm edge, i.e. resting on
     # the z=0 surface. The table's COLLISION box is recessed 3 mm below
     # that (see build_assets.py) so this resting contact does not read as
     # interpenetration.
-    initial_pose_xyzquat: [0.22, -0.10, 0.0125, 0.0, 0.0, 0.0, 1.0]
+    initial_pose_xyzquat: [0.22, -0.10, 0.015, 0.0, 0.0, 0.0, 1.0]
     handles:
       - cube/top
 
