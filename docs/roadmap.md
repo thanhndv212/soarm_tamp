@@ -7,7 +7,7 @@ keeps the world state current, and the mission recovers from disturbances. Open 
 VLA models come into the loop wherever they measurably do better than the deterministic
 parts.
 
-The tracker is GitHub: milestones **S1–S6** here and **M7–M10** in
+The tracker is GitHub: milestones **S1–S6** here and **M7–M11** in
 [long-tamp](https://github.com/thanhndv212/long-tamp/milestones), with one tracking issue
 listing everything ([#32](https://github.com/thanhndv212/soarm_tamp/issues/32)). This page
 is the overview. Issue status on GitHub is authoritative; tick an item here when its issue
@@ -80,7 +80,10 @@ batch the **baseline** S5 is judged against. Rules that hold throughout:
 
 ## Delivery plan
 
-The work runs in five waves. Inside a wave the tracks are independent.
+The work runs in five waves. Inside a wave the tracks are independent. Simulation
+runs ahead of the arm: long-tamp M10 (open models) starts in wave 2, and M11 shows the same
+stacking mission in MuJoCo in wave 3, so the showcase exists in sim before S6 shows it on
+the arm. The one library gate is long-tamp M8.
 
 ```mermaid
 flowchart LR
@@ -93,12 +96,14 @@ flowchart LR
   subgraph W2[Wave 2]
     S3[S3 stacking domain]
     M9[long-tamp M9<br/>perceived world state]
+    M10[long-tamp M10<br/>open VLM/VLA]
+    SIM[long-tamp #152<br/>SO-101 stacking in sim]
   end
   subgraph W3[Wave 3]
     S4[S4 AI missions on the arm<br/>baseline]
+    M11[long-tamp M11<br/>sim showcase + open benchmark]
   end
   subgraph W4[Wave 4]
-    M10[long-tamp M10<br/>open VLM/VLA]
     S5[S5 open models on the arm]
   end
   S6[Wave 5: S6 showcase]
@@ -110,15 +115,21 @@ flowchart LR
   S3 --> S4
   S4 --> S5
   M10 --> S5
+  M9 --> M11
+  M10 --> M11
+  M8 --> SIM
+  SIM --> S3
+  SIM --> M11
+  M11 --> S6
   S5 --> S6
 ```
 
 | Wave | Tracks | Done when |
 |---|---|---|
 | 1 | long-tamp M7 + S1 (execution); S2 (vision, hardware only until #12); long-tamp M8 (library) | The cube pick-and-place runs 10× through the executor; a random cube is picked from the camera pose; screw assembly runs on `long_tamp.mission` |
-| 2 | S3 + long-tamp M9 | Three goal types from four layouts on the arm |
-| 3 | S4 | 20 unattended instructions with disturbances: the baseline |
-| 4 | long-tamp M10 + S5 (M10's #143 and #144 can start in wave 1) | Benchmark report with an adoption decision per role |
+| 2 | long-tamp #152 (the stacking domain, written once in sim) then S3; long-tamp M9; long-tamp M10 (#142–#146 can start in wave 1; #147 needs M8) | Three goal types from four layouts on the arm; M10 benchmark report with an adoption decision per role |
+| 3 | S4 + long-tamp M11 (its benchmark study, long-tamp #150, can start in wave 1) | 20 unattended instructions with disturbances on the arm (the baseline) and 20 in MuJoCo (the sim showcase) |
+| 4 | S5 | Open models measured against the S4 baseline on the arm |
 | 5 | S6 | Final batch, video, webpage, releases |
 
 Labels: `type:*` and `area:*`, plus `needs-long-tamp` on issues blocked by a long-tamp
@@ -155,7 +166,7 @@ N cubes, K spots, pick/place/stack/unstack on long_tamp.mission, PDDL-planned fr
 
 - [ ] [#14](https://github.com/thanhndv212/soarm_tamp/issues/14) feat(scene): parametric scene, N cubes and K spots
 - [ ] [#15](https://github.com/thanhndv212/soarm_tamp/issues/15) study: stacking reachability on the 5-DOF arm
-- [ ] [#16](https://github.com/thanhndv212/soarm_tamp/issues/16) feat(domain): tabletop stacking domain on long_tamp.mission — after long-tamp #131, long-tamp #132, #15
+- [ ] [#16](https://github.com/thanhndv212/soarm_tamp/issues/16) feat(domain): tabletop stacking domain on long_tamp.mission — after long-tamp #152 (the domain is written once there, in sim), #15
 - [ ] [#17](https://github.com/thanhndv212/soarm_tamp/issues/17) feat(domain): initial-state scenarios and resume after kill — after #16
 - [ ] [#18](https://github.com/thanhndv212/soarm_tamp/issues/18) eval: S3 exit test, three goal types from four layouts on the arm — after #17, #13
 
@@ -187,7 +198,7 @@ Demo script, final batch on the arm, video, webpage, releases.
 - [ ] [#30](https://github.com/thanhndv212/soarm_tamp/issues/30) docs: video, webpage section and READMEs — after #29
 - [ ] [#31](https://github.com/thanhndv212/soarm_tamp/issues/31) chore(release): soarm_tamp 0.2.0 and the matching long-tamp release — after #30, long-tamp #148
 
-### long-tamp side (M7–M10)
+### long-tamp side (M7–M11)
 
 The library work lives in long-tamp's own roadmap (`docs/plans/roadmap.md`) and
 milestones; listed here so the whole plan reads in one place.
@@ -228,6 +239,14 @@ milestones; listed here so the whole plan reads in one place.
 - [ ] [long-tamp #146](https://github.com/thanhndv212/long-tamp/issues/146) feat(execution): learned-policy (VLA) skills
 - [ ] [long-tamp #147](https://github.com/thanhndv212/long-tamp/issues/147) feat(eval): component benchmark harness
 - [ ] [long-tamp #148](https://github.com/thanhndv212/long-tamp/issues/148) test: M10 exit test, benchmark report with adoption decisions
+
+**M11 Simulation showcase and open benchmark.** The SO-101 stacking mission end to end in MuJoCo (language goals, simulated camera, disturbances, recovery), plus an adapter to an open simulated benchmark with baseline numbers. Gated on M8. Exit test: 20 sim missions and benchmark results committed, before S6.
+
+- [ ] [long-tamp #150](https://github.com/thanhndv212/long-tamp/issues/150) study: choose the open simulated benchmark
+- [ ] [long-tamp #151](https://github.com/thanhndv212/long-tamp/issues/151) feat(sim): simulated camera, rendered views and marker poses
+- [ ] [long-tamp #152](https://github.com/thanhndv212/long-tamp/issues/152) feat(examples): SO-101 tabletop stacking in MuJoCo
+- [ ] [long-tamp #153](https://github.com/thanhndv212/long-tamp/issues/153) feat(eval): open benchmark adapter and baseline runs
+- [ ] [long-tamp #154](https://github.com/thanhndv212/long-tamp/issues/154) test: M11 exit test, sim showcase and benchmark results
 
 ## Risks
 
