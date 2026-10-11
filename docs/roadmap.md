@@ -83,7 +83,9 @@ batch the **baseline** S5 is judged against. Rules that hold throughout:
 The work runs in five waves. Inside a wave the tracks are independent. Simulation
 runs ahead of the arm: long-tamp M10 (open models) starts in wave 2, and M11 shows the same
 stacking mission in MuJoCo in wave 3, so the showcase exists in sim before S6 shows it on
-the arm. The one library gate is long-tamp M8.
+the arm. The one library gate is long-tamp M8. The open benchmark, RoboCerebra (long-tamp
+#156–#163), also needs long-tamp M7's remote backend; its first result (the Ideal condition)
+lands in wave 2, and the full six-condition table closes M11.
 
 ```mermaid
 flowchart LR
@@ -98,6 +100,7 @@ flowchart LR
     M9[long-tamp M9<br/>perceived world state]
     M10[long-tamp M10<br/>open VLM/VLA]
     SIM[long-tamp #152<br/>SO-101 stacking in sim]
+    RC[long-tamp #156-#159<br/>RoboCerebra, Ideal subset]
   end
   subgraph W3[Wave 3]
     S4[S4 AI missions on the arm<br/>baseline]
@@ -120,6 +123,9 @@ flowchart LR
   M8 --> SIM
   SIM --> S3
   SIM --> M11
+  M7 --> RC
+  M8 --> RC
+  RC --> M11
   M11 --> S6
   S5 --> S6
 ```
@@ -127,8 +133,8 @@ flowchart LR
 | Wave | Tracks | Done when |
 |---|---|---|
 | 1 | long-tamp M7 + S1 (execution); S2 (vision, hardware only until #12); long-tamp M8 (library) | The cube pick-and-place runs 10× through the executor; a random cube is picked from the camera pose; screw assembly runs on `long_tamp.mission` |
-| 2 | long-tamp #152 (the stacking domain, written once in sim) then S3; long-tamp M9; long-tamp M10 (#142–#146 can start in wave 1; #147 needs M8) | Three goal types from four layouts on the arm; M10 benchmark report with an adoption decision per role |
-| 3 | S4 + long-tamp M11 (its benchmark study, long-tamp #150, can start in wave 1) | 20 unattended instructions with disturbances on the arm (the baseline) and 20 in MuJoCo (the sim showcase) |
+| 2 | long-tamp #152 (the stacking domain, written once in sim) then S3; long-tamp M9; long-tamp M10 (#142–#146 can start in wave 1; #147 needs M8); RoboCerebra #156–#159 (after long-tamp #125 and M8) | Three goal types from four layouts on the arm; M10 benchmark report with an adoption decision per role; first RoboCerebra number (Ideal, pick/in/on subtasks) |
+| 3 | S4 + long-tamp M11: RoboCerebra #160–#163 (pour, articulated objects, disturbance conditions, continuous variant) | 20 unattended instructions with disturbances on the arm (the baseline) and 20 in MuJoCo (the sim showcase); RoboCerebra results for all six conditions |
 | 4 | S5 | Open models measured against the S4 baseline on the arm |
 | 5 | S6 | Final batch, video, webpage, releases |
 
@@ -240,13 +246,14 @@ milestones; listed here so the whole plan reads in one place.
 - [ ] [long-tamp #147](https://github.com/thanhndv212/long-tamp/issues/147) feat(eval): component benchmark harness
 - [ ] [long-tamp #148](https://github.com/thanhndv212/long-tamp/issues/148) test: M10 exit test, benchmark report with adoption decisions
 
-**M11 Simulation showcase and open benchmark.** The SO-101 stacking mission end to end in MuJoCo (language goals, simulated camera, disturbances, recovery), plus an adapter to an open simulated benchmark with baseline numbers. Gated on M8. Exit test: 20 sim missions and benchmark results committed, before S6.
+**M11 Simulation showcase and open benchmark.** The SO-101 stacking mission end to end in MuJoCo (language goals, simulated camera, disturbances, recovery), plus the RoboCerebra benchmark (chosen in long-tamp #150; LIBERO-based, long-horizon, scores disturbances and plan–observation mismatch). Gated on M8; the benchmark also needs long-tamp #125. Exit test: 20 sim missions and RoboCerebra results committed, before S6.
 
 - [ ] [long-tamp #150](https://github.com/thanhndv212/long-tamp/issues/150) study: choose the open simulated benchmark
 - [ ] [long-tamp #151](https://github.com/thanhndv212/long-tamp/issues/151) feat(sim): simulated camera, rendered views and marker poses
 - [ ] [long-tamp #152](https://github.com/thanhndv212/long-tamp/issues/152) feat(examples): SO-101 tabletop stacking in MuJoCo
 - [ ] [long-tamp #153](https://github.com/thanhndv212/long-tamp/issues/153) feat(eval): open benchmark adapter and baseline runs
 - [ ] [long-tamp #154](https://github.com/thanhndv212/long-tamp/issues/154) test: M11 exit test, sim showcase and benchmark results
+- [ ] long-tamp #153 split into RoboCerebra R1–R8: [#156](https://github.com/thanhndv212/long-tamp/issues/156) env server, [#157](https://github.com/thanhndv212/long-tamp/issues/157) scene exporter, [#158](https://github.com/thanhndv212/long-tamp/issues/158) grasps, [#159](https://github.com/thanhndv212/long-tamp/issues/159) goal translator + tracker + Ideal subset, [#160](https://github.com/thanhndv212/long-tamp/issues/160) pour, [#161](https://github.com/thanhndv212/long-tamp/issues/161) articulated objects, [#162](https://github.com/thanhndv212/long-tamp/issues/162) disturbance/mismatch/mix, [#163](https://github.com/thanhndv212/long-tamp/issues/163) continuous variant + tables
 
 ## Risks
 
