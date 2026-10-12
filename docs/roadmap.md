@@ -128,7 +128,17 @@ flowchart LR
   RC --> M11
   M11 --> S6
   S5 --> S6
+  classDef hw fill:#ffe0b2,stroke:#e65100,stroke-width:2px,color:#000
+  classDef bench fill:#bbdefb,stroke:#0d47a1,stroke-width:2px,color:#000
+  class S1,S2,S3,S4,S5,S6 hw
+  class RC,M11 bench
+  linkStyle 2,3,5,6,17 stroke:#e65100,stroke-width:3px
+  linkStyle 13,14,15,16 stroke:#0d47a1,stroke-width:3px
 ```
+
+Orange: the real-hardware path on the SO-101 (soarm_tamp S1–S6). Blue: the simulated
+benchmark path (RoboCerebra, long-tamp #156–#163, closing M11). Uncoloured nodes are
+long-tamp library milestones that both paths build on.
 
 | Wave | Tracks | Done when |
 |---|---|---|
